@@ -4,7 +4,7 @@ A Zig-based game framework designed for high-performance 3D graphics.
 
 ## Description
 
-Saturn Framework is a game development framework written in Zig that focuses on delivering high preformance 3D rendering.
+Saturn Framework is a game development framework written in Zig that focuses on high performance 3D rendering.
 
 ## Requirements
 
