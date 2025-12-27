@@ -10,9 +10,6 @@ pub const c = @cImport({
 });
 
 const saturn = @import("../root.zig");
-const Platform = saturn.Platform;
-const Window = saturn.Window;
-const Device = saturn.Device;
 
 //TODO: use tagged union
 const RenderingBackend = @import("../rendering/vulkan/platform.zig").Backend;
@@ -22,7 +19,7 @@ const Self = @This();
 gpa: std.mem.Allocator,
 backend: *RenderingBackend,
 
-pub fn init(gpa: std.mem.Allocator, desc: Platform.Desc) saturn.Error!Self {
+pub fn init(gpa: std.mem.Allocator, desc: saturn.PlatformDesc) saturn.Error!Self {
     const compile_version = c.SDL_VERSION;
     std.log.info("Compiled against sdl {}.{}.{}", .{ c.SDL_VERSIONNUM_MAJOR(compile_version), c.SDL_VERSIONNUM_MINOR(compile_version), c.SDL_VERSIONNUM_MICRO(compile_version) });
 
@@ -77,7 +74,7 @@ pub fn deinit(self: *Self) void {
     c.SDL_Quit();
 }
 
-pub fn interface(self: *Self) Platform.Interface {
+pub fn interface(self: *Self) saturn.PlatformInterface {
     return .{
         .ctx = self,
         .vtable = &.{
@@ -97,7 +94,7 @@ pub fn interface(self: *Self) Platform.Interface {
     };
 }
 
-pub fn process_events(ctx: *anyopaque, callbacks: Platform.Callbacks) void {
+pub fn process_events(ctx: *anyopaque, callbacks: saturn.PlatformCallbacks) void {
     _ = ctx; // autofix
 
     var event: c.SDL_Event = undefined;
@@ -112,7 +109,7 @@ pub fn process_events(ctx: *anyopaque, callbacks: Platform.Callbacks) void {
                 if (callbacks.window_resize) |resize_fn| {
                     if (c.SDL_GetWindowFromID(event.window.windowID)) |sdl_window| {
                         const size: [2]u32 = .{ @intCast(event.window.data1), @intCast(event.window.data2) };
-                        const window: Window.Handle = @enumFromInt(@intFromPtr(sdl_window));
+                        const window: saturn.WindowHandle = @enumFromInt(@intFromPtr(sdl_window));
                         resize_fn(callbacks.ctx, window, size);
                     } else {
                         std.log.warn("SDL_GetWindowFromID Failed for ID({})", .{event.window.windowID});
@@ -122,7 +119,7 @@ pub fn process_events(ctx: *anyopaque, callbacks: Platform.Callbacks) void {
             c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => {
                 if (callbacks.window_close_requested) |close_fn| {
                     if (c.SDL_GetWindowFromID(event.window.windowID)) |sdl_window| {
-                        const window: Window.Handle = @enumFromInt(@intFromPtr(sdl_window));
+                        const window: saturn.WindowHandle = @enumFromInt(@intFromPtr(sdl_window));
                         close_fn(callbacks.ctx, window);
                     } else {
                         std.log.warn("SDL_GetWindowFromID Failed for ID({})", .{event.window.windowID});
@@ -131,7 +128,7 @@ pub fn process_events(ctx: *anyopaque, callbacks: Platform.Callbacks) void {
             },
             c.SDL_EVENT_MOUSE_BUTTON_UP, c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
                 if (callbacks.mouse_button) |mouse_button_fn| {
-                    const button = std.meta.intToEnum(saturn.Mouse.Button, event.button.button) catch continue;
+                    const button = std.meta.intToEnum(saturn.MouseButton, event.button.button) catch continue;
                     const state: saturn.ButtonState = if (event.button.down) .pressed else .released;
                     mouse_button_fn(callbacks.ctx, button, state);
                 }
@@ -174,14 +171,14 @@ pub fn process_events(ctx: *anyopaque, callbacks: Platform.Callbacks) void {
             },
             c.SDL_EVENT_GAMEPAD_BUTTON_UP, c.SDL_EVENT_GAMEPAD_BUTTON_DOWN => {
                 if (callbacks.gamepad_button) |gamepad_button_fn| {
-                    const button = std.meta.intToEnum(saturn.Gamepad.Button, event.gbutton.button) catch continue;
+                    const button = std.meta.intToEnum(saturn.GamepadButton, event.gbutton.button) catch continue;
                     const state: saturn.ButtonState = if (event.gbutton.down) .pressed else .released;
                     gamepad_button_fn(callbacks.ctx, event.gbutton.which, button, state);
                 }
             },
             c.SDL_EVENT_GAMEPAD_AXIS_MOTION => {
                 if (callbacks.gamepad_axis) |gamepad_axis_motion_fn| {
-                    const axis = std.meta.intToEnum(saturn.Gamepad.Axis, event.gaxis.axis) catch continue;
+                    const axis = std.meta.intToEnum(saturn.GamepadAxis, event.gaxis.axis) catch continue;
                     const f_value: f32 = @as(f32, @floatFromInt(event.gaxis.value)) / std.math.maxInt(i16);
                     gamepad_axis_motion_fn(callbacks.ctx, event.gaxis.which, axis, f_value);
                 }
@@ -191,7 +188,7 @@ pub fn process_events(ctx: *anyopaque, callbacks: Platform.Callbacks) void {
     }
 }
 
-pub fn createWindow(ctx: *anyopaque, desc: Window.Desc) saturn.Error!Window.Handle {
+pub fn createWindow(ctx: *anyopaque, desc: saturn.WindowDesc) saturn.Error!saturn.WindowHandle {
     const self: *Self = @ptrCast(@alignCast(ctx));
 
     var window_width: i32 = 1600;
@@ -214,39 +211,39 @@ pub fn createWindow(ctx: *anyopaque, desc: Window.Desc) saturn.Error!Window.Hand
     const sdl_window: *c.SDL_Window = c.SDL_CreateWindow(desc.name, window_width, window_height, window_flags) orelse return error.FailedToCreateWindow;
     errdefer c.SDL_DestroyWindow(sdl_window);
 
-    const window: Window.Handle = @enumFromInt(@intFromPtr(sdl_window));
+    const window: saturn.WindowHandle = @enumFromInt(@intFromPtr(sdl_window));
     try self.backend.createSurface(window);
     return window;
 }
-pub fn destroyWindow(ctx: *anyopaque, window: Window.Handle) void {
+pub fn destroyWindow(ctx: *anyopaque, window: saturn.WindowHandle) void {
     const self: *Self = @ptrCast(@alignCast(ctx));
     self.backend.destroySurface(window);
     const sdl_window: ?*c.SDL_Window = @ptrFromInt(@intFromEnum(window));
     c.SDL_DestroyWindow(sdl_window);
 }
 
-pub fn getDevices(ctx: *anyopaque) []const Device.Info {
+pub fn getDevices(ctx: *anyopaque) []const saturn.DeviceInfo {
     const self: *Self = @ptrCast(@alignCast(ctx));
     return self.backend.instance.physical_devices_info;
 }
 
-pub fn doesDeviceSupportPresent(ctx: *anyopaque, device_index: u32, window: Window.Handle) bool {
+pub fn doesDeviceSupportPresent(ctx: *anyopaque, device_index: u32, window: saturn.WindowHandle) bool {
     const self: *Self = @ptrCast(@alignCast(ctx));
     return self.backend.doesDeviceSupportPresent(device_index, window);
 }
 
-pub fn getWindowSupport(ctx: *anyopaque, device_index: u32, window: Window.Handle) ?Window.Support {
+pub fn getWindowSupport(ctx: *anyopaque, device_index: u32, window: saturn.WindowHandle) ?saturn.WindowSupport {
     _ = ctx; // autofix
     _ = window; // autofix
     _ = device_index; // autofix
     return null;
 }
 
-pub fn createDevice(ctx: *anyopaque, device_index: u32, desc: Device.Desc) saturn.Error!Device.Interface {
+pub fn createDevice(ctx: *anyopaque, device_index: u32, desc: saturn.DeviceDesc) saturn.Error!saturn.DeviceInterface {
     const self: *Self = @ptrCast(@alignCast(ctx));
     return self.backend.createDevice(device_index, desc);
 }
-pub fn destroyDevice(ctx: *anyopaque, device: Device.Interface) void {
+pub fn destroyDevice(ctx: *anyopaque, device: saturn.DeviceInterface) void {
     const self: *Self = @ptrCast(@alignCast(ctx));
     self.backend.destroyDevice(device);
 }
@@ -254,7 +251,7 @@ pub fn destroyDevice(ctx: *anyopaque, device: Device.Interface) void {
 /// Callback function for getting window size from SDL3
 /// This is passed to the rendering backend to query window dimensions
 /// Returns [width, height] as a backend-agnostic type
-fn getWindowSize(window: Window.Handle, user_data: ?*anyopaque) [2]u32 {
+fn getWindowSize(window: saturn.WindowHandle, user_data: ?*anyopaque) [2]u32 {
     const sdl_window: ?*c.SDL_Window = @ptrFromInt(@intFromEnum(window));
 
     _ = user_data;
@@ -268,7 +265,7 @@ fn getWindowSize(window: Window.Handle, user_data: ?*anyopaque) [2]u32 {
 }
 
 const vk = @import("vulkan");
-pub fn createSurface(instance: vk.Instance, window: saturn.Window.Handle, allocator: ?*const vk.AllocationCallbacks) ?vk.SurfaceKHR {
+pub fn createSurface(instance: vk.Instance, window: saturn.WindowHandle, allocator: ?*const vk.AllocationCallbacks) ?vk.SurfaceKHR {
     var c_surface: c.VkSurfaceKHR = undefined;
     const c_instance: c.VkInstance = @ptrFromInt(@intFromEnum(instance));
     const c_allocator: ?*c.VkAllocationCallbacks = @ptrCast(@constCast(allocator));

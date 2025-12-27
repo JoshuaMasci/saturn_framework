@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
     const graphics = b.option(config.Graphics, "graphics", "Force use of spesific graphics implementation") orelse .default;
     options.addOption(config.Graphics, "graphics", graphics);
 
-    const single_threaded = b.option(bool, "single_threaded", "Compiles implimentatiosn without locks") orelse false;
+    const single_threaded = b.option(bool, "single_threaded", "Compiles implementation without locks") orelse false;
     options.addOption(bool, "single_threaded", single_threaded);
 
     const target = b.standardTargetOptions(.{});
@@ -25,15 +25,16 @@ pub fn build(b: *std.Build) void {
     root_module.addOptions("saturn_config", options);
 
     if (platform == .default or platform == .force_sdl3) {
-        const sdl3 = b.lazyDependency("sdl", .{
-            .target = target,
-            .optimize = optimize,
-            .preferred_linkage = .dynamic,
-        }).?;
-        root_module.linkLibrary(sdl3.artifact("SDL3"));
+        // const sdl3 = b.lazyDependency("sdl", .{
+        //     .target = target,
+        //     .optimize = optimize,
+        //     .preferred_linkage = .dynamic,
+        // }).?;
+        // root_module.linkLibrary(sdl3.artifact("SDL3"));
 
         //TODO: link system lib when avalible
-        //root_module.linkSystemLibrary("SDL3", .{ .preferred_link_mode = .dynamic });
+        root_module.link_libc = true;
+        root_module.linkSystemLibrary("SDL3", .{ .preferred_link_mode = .dynamic });
     }
 
     if (graphics == .default or graphics == .force_vulkan) {

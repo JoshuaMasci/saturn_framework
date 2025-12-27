@@ -19,7 +19,7 @@ proxy: vk.InstanceProxy,
 
 name_pool: std.heap.ArenaAllocator,
 physical_devices: []const PhysicalDevice,
-physical_devices_info: []const saturn.Device.Info,
+physical_devices_info: []const saturn.DeviceInfo,
 
 debug_messager: ?DebugMessenger,
 
@@ -63,7 +63,7 @@ pub fn init(
     const physical_devices = try allocator.alloc(PhysicalDevice, physical_device_handles.len);
     errdefer allocator.free(physical_devices);
 
-    const physical_devices_info = try allocator.alloc(saturn.Device.Info, physical_device_handles.len);
+    const physical_devices_info = try allocator.alloc(saturn.DeviceInfo, physical_device_handles.len);
     errdefer allocator.free(physical_devices_info);
 
     var name_pool: std.heap.ArenaAllocator = .init(allocator);

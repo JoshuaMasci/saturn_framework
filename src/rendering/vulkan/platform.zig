@@ -18,8 +18,8 @@ const GraphResources = @import("graph_resources.zig");
 const graph_compiler = @import("graph_compiler.zig");
 const graph_executor = @import("graph_executor.zig");
 
-pub const SurfaceCreateFn = *const fn (instance: vk.Instance, window: saturn.Window.Handle, allocator: ?*const vk.AllocationCallbacks) ?vk.SurfaceKHR;
-pub const GetWindowSizeFn = *const fn (window: saturn.Window.Handle, user_data: ?*anyopaque) [2]u32;
+pub const SurfaceCreateFn = *const fn (instance: vk.Instance, window: saturn.WindowHandle, allocator: ?*const vk.AllocationCallbacks) ?vk.SurfaceKHR;
+pub const GetWindowSizeFn = *const fn (window: saturn.WindowHandle, user_data: ?*anyopaque) [2]u32;
 
 pub const Backend = struct {
     const Self = @This();
@@ -29,7 +29,7 @@ pub const Backend = struct {
     instance: *Instance,
 
     create_surface_fn: SurfaceCreateFn,
-    surfaces: std.AutoArrayHashMap(saturn.Window.Handle, vk.SurfaceKHR),
+    surfaces: std.AutoArrayHashMap(saturn.WindowHandle, vk.SurfaceKHR),
 
     devices: std.AutoHashMap(*Device, void),
 
@@ -90,19 +90,19 @@ pub const Backend = struct {
         self.gpa.destroy(self.instance);
     }
 
-    pub fn createSurface(self: *Self, window: saturn.Window.Handle) saturn.Error!void {
+    pub fn createSurface(self: *Self, window: saturn.WindowHandle) saturn.Error!void {
         const surface = self.create_surface_fn(self.instance.proxy.handle, window, null) orelse return error.FailedToCreateSurface;
         try self.surfaces.put(window, surface);
     }
 
-    pub fn destroySurface(self: *Self, window: saturn.Window.Handle) void {
+    pub fn destroySurface(self: *Self, window: saturn.WindowHandle) void {
         if (self.surfaces.get(window)) |surface| {
             self.instance.proxy.destroySurfaceKHR(surface, null);
             _ = self.surfaces.swapRemove(window);
         }
     }
 
-    pub fn doesDeviceSupportPresent(self: *Self, device_index: u32, window: saturn.Window.Handle) bool {
+    pub fn doesDeviceSupportPresent(self: *Self, device_index: u32, window: saturn.WindowHandle) bool {
         if (self.surfaces.get(window)) |surface| {
             const result = self.instance.proxy.getPhysicalDeviceSurfaceSupportKHR(
                 self.instance.physical_devices[device_index].handle,
@@ -118,8 +118,8 @@ pub const Backend = struct {
     pub fn createDevice(
         self: *Self,
         physical_device_index: u32,
-        desc: saturn.Device.Desc,
-    ) saturn.Error!saturn.Device.Interface {
+        desc: saturn.DeviceDesc,
+    ) saturn.Error!saturn.DeviceInterface {
         const device_ptr = try self.gpa.create(Device);
         errdefer self.gpa.destroy(device_ptr);
 
@@ -135,7 +135,7 @@ pub const Backend = struct {
         return device_ptr.interface();
     }
 
-    pub fn destroyDevice(self: *Self, device: saturn.Device.Interface) void {
+    pub fn destroyDevice(self: *Self, device: saturn.DeviceInterface) void {
         const device_ptr: *Device = @ptrCast(@alignCast(device.ctx));
 
         if (self.devices.remove(device_ptr)) {
@@ -218,7 +218,7 @@ pub const Device = struct {
 
     pipeline_layout: vk.PipelineLayout,
 
-    swapchains: std.AutoHashMap(saturn.Window.Handle, *Swapchain),
+    swapchains: std.AutoHashMap(saturn.WindowHandle, *Swapchain),
     shader_modules: std.AutoHashMap(vk.ShaderModule, void),
     graphics_pipelines: std.AutoHashMap(vk.Pipeline, void),
     compute_pipelines: std.AutoHashMap(vk.Pipeline, void),
@@ -235,7 +235,7 @@ pub const Device = struct {
         gpa: std.mem.Allocator,
         backend: *Backend,
         physical_device_index: u32,
-        desc: saturn.Device.Desc,
+        desc: saturn.DeviceDesc,
     ) saturn.Error!Self {
         var device = try gpa.create(VkDevice);
         errdefer gpa.destroy(device);
@@ -360,7 +360,7 @@ pub const Device = struct {
         self.gpa.destroy(self.device);
     }
 
-    pub fn interface(self: *Self) saturn.Device.Interface {
+    pub fn interface(self: *Self) saturn.DeviceInterface {
         return .{
             .ctx = self,
             .vtable = &.{
@@ -383,12 +383,12 @@ pub const Device = struct {
         };
     }
 
-    fn getInfo(ctx: *anyopaque) saturn.Device.Info {
+    fn getInfo(ctx: *anyopaque) saturn.DeviceInfo {
         const self: *Self = @ptrCast(@alignCast(ctx));
         return self.backend.instance.physical_devices_info[self.physical_device_index];
     }
 
-    fn createBuffer(ctx: *anyopaque, desc: saturn.Buffer.Desc) saturn.Error!saturn.Buffer.Handle {
+    fn createBuffer(ctx: *anyopaque, desc: saturn.BufferDesc) saturn.Error!saturn.BufferHandle {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         const usage = getVkBufferUsage(desc.usage);
@@ -426,7 +426,7 @@ pub const Device = struct {
         return @enumFromInt(@intFromEnum(buffer.handle));
     }
 
-    fn destroyBuffer(ctx: *anyopaque, buffer: saturn.Buffer.Handle) void {
+    fn destroyBuffer(ctx: *anyopaque, buffer: saturn.BufferHandle) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const vk_buffer: vk.Buffer = @enumFromInt(@intFromEnum(buffer));
 
@@ -437,7 +437,7 @@ pub const Device = struct {
         }
     }
 
-    fn createTexture(ctx: *anyopaque, desc: saturn.Texture.Desc) saturn.Error!saturn.Texture.Handle {
+    fn createTexture(ctx: *anyopaque, desc: saturn.TextureDesc) saturn.Error!saturn.TextureHandle {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         const format = getVkFormat(desc.format);
@@ -465,7 +465,7 @@ pub const Device = struct {
         return @enumFromInt(@intFromEnum(texture.handle));
     }
 
-    fn destroyTexture(ctx: *anyopaque, texture: saturn.Texture.Handle) void {
+    fn destroyTexture(ctx: *anyopaque, texture: saturn.TextureHandle) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const vk_image: vk.Image = @enumFromInt(@intFromEnum(texture));
 
@@ -507,7 +507,7 @@ pub const Device = struct {
         }
     }
 
-    fn createGraphicsPipeline(ctx: *anyopaque, desc: saturn.GraphicsPipeline.Desc) saturn.Error!saturn.GraphicsPipeline.Handle {
+    fn createGraphicsPipeline(ctx: *anyopaque, desc: saturn.GraphicsPipelineDesc) saturn.Error!saturn.GraphicsPipelineHandle {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         const vertex_module: vk.ShaderModule = @enumFromInt(@intFromEnum(desc.vertex));
@@ -535,7 +535,7 @@ pub const Device = struct {
         return @enumFromInt(@intFromEnum(pipeline));
     }
 
-    fn destroyGraphicsPipeline(ctx: *anyopaque, pipeline: saturn.GraphicsPipeline.Handle) void {
+    fn destroyGraphicsPipeline(ctx: *anyopaque, pipeline: saturn.GraphicsPipelineHandle) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const vk_pipeline: vk.Pipeline = @enumFromInt(@intFromEnum(pipeline));
 
@@ -546,7 +546,7 @@ pub const Device = struct {
         }
     }
 
-    fn createComputePipeline(ctx: *anyopaque, desc: saturn.ComputePipeline.Desc) saturn.Error!saturn.ComputePipeline.Handle {
+    fn createComputePipeline(ctx: *anyopaque, desc: saturn.ComputePipelineDesc) saturn.Error!saturn.ComputePipelineHandle {
         _ = desc; // autofix
         const self: *Self = @ptrCast(@alignCast(ctx));
         _ = self; // autofix
@@ -554,7 +554,7 @@ pub const Device = struct {
         return error.OutOfMemory;
     }
 
-    fn destroyComputePipeline(ctx: *anyopaque, pipeline: saturn.ComputePipeline.Handle) void {
+    fn destroyComputePipeline(ctx: *anyopaque, pipeline: saturn.ComputePipelineHandle) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const vk_pipeline: vk.Pipeline = @enumFromInt(@intFromEnum(pipeline));
 
@@ -565,7 +565,7 @@ pub const Device = struct {
         }
     }
 
-    fn claimWindow(ctx: *anyopaque, window: saturn.Window.Handle, desc: saturn.Window.Settings) saturn.Error!void {
+    fn claimWindow(ctx: *anyopaque, window: saturn.WindowHandle, desc: saturn.WindowSettings) saturn.Error!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         // Use existing conversion functions
@@ -627,7 +627,7 @@ pub const Device = struct {
         }
     }
 
-    fn releaseWindow(ctx: *anyopaque, window: saturn.Window.Handle) void {
+    fn releaseWindow(ctx: *anyopaque, window: saturn.WindowHandle) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         if (self.swapchains.fetchRemove(window)) |entry| {
@@ -637,7 +637,7 @@ pub const Device = struct {
         }
     }
 
-    fn submit(ctx: *anyopaque, tpa: std.mem.Allocator, graph: *const saturn.RenderGraph.Desc) saturn.Error!void {
+    fn submit(ctx: *anyopaque, tpa: std.mem.Allocator, graph: *const saturn.RenderGraphDesc) saturn.Error!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         const frame_data = &self.per_frame_data[self.frame_index];
@@ -670,7 +670,7 @@ pub const Device = struct {
     }
 };
 
-fn getVkBufferUsage(usage: saturn.Buffer.Usage) vk.BufferUsageFlags {
+fn getVkBufferUsage(usage: saturn.BufferUsage) vk.BufferUsageFlags {
     return .{
         .vertex_buffer_bit = usage.vertex,
         .index_buffer_bit = usage.index,
@@ -681,7 +681,7 @@ fn getVkBufferUsage(usage: saturn.Buffer.Usage) vk.BufferUsageFlags {
     };
 }
 
-fn getVkFormat(format: saturn.Texture.Format) vk.Format {
+fn getVkFormat(format: saturn.TextureFormat) vk.Format {
     return switch (format) {
         .rgba8_unorm => .r8g8b8a8_unorm,
         .bgra8_unorm => .b8g8r8a8_unorm,
@@ -704,7 +704,7 @@ fn getVkFormat(format: saturn.Texture.Format) vk.Format {
     };
 }
 
-fn getVkImageUsage(usage: saturn.Texture.Usage) vk.ImageUsageFlags {
+fn getVkImageUsage(usage: saturn.TextureUsage) vk.ImageUsageFlags {
     return .{
         .transfer_src_bit = usage.transfer,
         .transfer_dst_bit = usage.transfer,
@@ -714,7 +714,7 @@ fn getVkImageUsage(usage: saturn.Texture.Usage) vk.ImageUsageFlags {
     };
 }
 
-fn getVkPresentMode(mode: saturn.Window.PresentMode) vk.PresentModeKHR {
+fn getVkPresentMode(mode: saturn.PresentMode) vk.PresentModeKHR {
     return switch (mode) {
         .fifo => .fifo_khr,
         .immediate => .immediate_khr,

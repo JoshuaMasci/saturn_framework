@@ -29,11 +29,11 @@ const SwapchainInfo = struct {
 
 const BufferData = struct {
     buffer: Buffer,
-    inital_state: ?saturn.RenderGraph.BufferUsage = null,
+    inital_state: ?saturn.RenderGraphBufferUsage = null,
 };
 const TextureData = struct {
     texture: Texture,
-    inital_state: ?saturn.RenderGraph.TextureUsage = null,
+    inital_state: ?saturn.RenderGraphTextureUsage = null,
 };
 
 const Self = @This();
@@ -44,7 +44,7 @@ swapchains: []SwapchainInfo,
 buffers: []BufferData,
 textures: []TextureData,
 
-pub fn init(allocator: std.mem.Allocator, graph: *const saturn.RenderGraph.Desc, device: *Device) Error!Self {
+pub fn init(allocator: std.mem.Allocator, graph: *const saturn.RenderGraphDesc, device: *Device) Error!Self {
     const swapchains: []SwapchainInfo = try allocator.alloc(SwapchainInfo, graph.windows.len);
     errdefer allocator.free(swapchains);
 

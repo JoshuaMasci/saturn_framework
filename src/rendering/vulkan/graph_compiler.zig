@@ -68,20 +68,20 @@ const NodeData = struct {
 const EdgeData = union(enum) {
     buffer: struct {
         index: usize,
-        last: saturn.RenderGraph.BufferUsage,
-        next: saturn.RenderGraph.BufferUsage,
+        last: saturn.RenderGraphBufferUsage,
+        next: saturn.RenderGraphBufferUsage,
     },
     texture: struct {
         index: usize,
-        last: saturn.RenderGraph.TextureUsage,
-        next: saturn.RenderGraph.TextureUsage,
+        last: saturn.RenderGraphTextureUsage,
+        next: saturn.RenderGraphTextureUsage,
     },
 };
 
 const BufferState = struct {
     const PassUsage = struct {
         last_pass: ?u16 = null,
-        usage: saturn.RenderGraph.BufferUsage,
+        usage: saturn.RenderGraphBufferUsage,
     };
 
     // write: BufferPassUsage,
@@ -98,7 +98,7 @@ const BufferState = struct {
 const TextureState = struct {
     const PassUsage = struct {
         last_pass: ?u16 = null,
-        usage: saturn.RenderGraph.TextureUsage,
+        usage: saturn.RenderGraphTextureUsage,
     };
 
     last: ?PassUsage = null,
@@ -112,7 +112,7 @@ const TextureState = struct {
 
 pub fn compileGraphBasic(
     allocator: std.mem.Allocator,
-    render_graph: *const saturn.RenderGraph.Desc,
+    render_graph: *const saturn.RenderGraphDesc,
     resources: *const GraphResources,
     settings: Setting,
 ) !CompiledGraph {
@@ -194,7 +194,7 @@ pub fn compileGraphBasic(
 // I think the graph sorted is reversed
 pub fn compileGraph(
     allocator: std.mem.Allocator,
-    render_graph: *const saturn.RenderGraph.Desc,
+    render_graph: *const saturn.RenderGraphDesc,
     resources: *const GraphResources,
     settings: Setting,
 ) !CompiledGraph {
@@ -406,7 +406,7 @@ const BufferFlags = struct {
     stage_mask: vk.PipelineStageFlags2,
     access_mask: vk.AccessFlags2,
 
-    fn from(usage: saturn.RenderGraph.BufferUsage) BufferFlags {
+    fn from(usage: saturn.RenderGraphBufferUsage) BufferFlags {
         _ = usage; // autofix
         return .{
             .stage_mask = .{ .all_commands_bit = true },
@@ -415,7 +415,7 @@ const BufferFlags = struct {
     }
 };
 
-fn createBufferBarrier(buffer: Buffer, src: saturn.RenderGraph.BufferUsage, dst: saturn.RenderGraph.BufferUsage) vk.BufferMemoryBarrier2 {
+fn createBufferBarrier(buffer: Buffer, src: saturn.RenderGraphBufferUsage, dst: saturn.RenderGraphBufferUsage) vk.BufferMemoryBarrier2 {
     const src_mask: BufferFlags = .from(src);
     const dst_mask: BufferFlags = .from(dst);
 
@@ -439,7 +439,7 @@ const TextureFlags = struct {
     access_mask: vk.AccessFlags2,
     layout: vk.ImageLayout,
 
-    fn from(usage: saturn.RenderGraph.TextureUsage, unified_image_layouts: bool) TextureFlags {
+    fn from(usage: saturn.RenderGraphTextureUsage, unified_image_layouts: bool) TextureFlags {
         _ = unified_image_layouts; // autofix
         return .{
             .stage_mask = .{ .all_commands_bit = true },
@@ -456,8 +456,8 @@ const TextureFlags = struct {
 
 fn createTextureBarrier(
     texture: Texture,
-    src: saturn.RenderGraph.TextureUsage,
-    dst: saturn.RenderGraph.TextureUsage,
+    src: saturn.RenderGraphTextureUsage,
+    dst: saturn.RenderGraphTextureUsage,
     unified_image_layouts: bool,
 ) vk.ImageMemoryBarrier2 {
     const src_mask: TextureFlags = .from(src, unified_image_layouts);

@@ -11,7 +11,7 @@ const GraphResources = @import("graph_resources.zig");
 const Device = @import("platform.zig").Device;
 const Swapchain = @import("swapchain.zig");
 
-pub fn executeGraph(tpa: std.mem.Allocator, device: *Device, graph: *const saturn.RenderGraph.Desc, resources: *const GraphResources, compiled: *const CompiledGraph) !void {
+pub fn executeGraph(tpa: std.mem.Allocator, device: *Device, graph: *const saturn.RenderGraphDesc, resources: *const GraphResources, compiled: *const CompiledGraph) !void {
     const frame_data = &device.per_frame_data[device.frame_index];
 
     const command_buffer_handle = try frame_data.graphics_command_pool.get();
@@ -143,7 +143,7 @@ const SwapchainImageInfo = struct {
     present_semaphore: vk.Semaphore,
 };
 
-fn beginRendering(command_buffer: vk.CommandBufferProxy, resources: *const GraphResources, render_target: *const saturn.RenderGraph.RenderTarget) void {
+fn beginRendering(command_buffer: vk.CommandBufferProxy, resources: *const GraphResources, render_target: *const saturn.RenderGraphRenderTarget) void {
     var color_attachments_buffer: [8]vk.RenderingAttachmentInfo = undefined;
     const color_attachments = color_attachments_buffer[0..render_target.color_attachemnts.count];
     var render_extent: ?vk.Extent2D = null;

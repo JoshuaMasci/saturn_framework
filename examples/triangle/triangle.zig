@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Saturn = @import("saturn");
+const saturn = @import("saturn");
 
 //Globals
 var is_running: bool = true;
@@ -9,7 +9,8 @@ fn quitCallback(ctx: ?*anyopaque) void {
     std.log.info("App quit requested", .{});
     is_running = false;
 }
-fn windowCloseCallback(ctx: ?*anyopaque, window: Saturn.Window.Handle) void {
+
+fn windowCloseCallback(ctx: ?*anyopaque, window: saturn.WindowHandle) void {
     _ = ctx; // autofix
     _ = window; // autofix
     std.log.info("Window close requested", .{});
@@ -21,12 +22,12 @@ fn gamepadConnectedCallback(ctx: ?*anyopaque, gamepad_id: u32) void {
     std.log.info("Gamepad Connected: {}", .{gamepad_id});
 }
 
-fn gamepadButtonCallback(ctx: ?*anyopaque, gamepad_id: u32, button: Saturn.Gamepad.Button, state: Saturn.ButtonState) void {
+fn gamepadButtonCallback(ctx: ?*anyopaque, gamepad_id: u32, button: saturn.GamepadButton, state: saturn.ButtonState) void {
     _ = ctx; // autofix
     std.log.info("Gamepad({}) Button: {} -> {}", .{ gamepad_id, button, state });
 }
 
-fn gamepadAxisCallback(ctx: ?*anyopaque, gamepad_id: u32, axis: Saturn.Gamepad.Axis, value: f32) void {
+fn gamepadAxisCallback(ctx: ?*anyopaque, gamepad_id: u32, axis: saturn.GamepadAxis, value: f32) void {
     _ = ctx; // autofix
     _ = gamepad_id; // autofix
 
@@ -52,20 +53,26 @@ pub fn main() !void {
     const tpa = arena_allocator.allocator();
 
     const name = "Triangle Demo";
-    var platform = try Saturn.init(gpa, .{
+    var platform = try saturn.init(gpa, .{
         .app_info = .{ .name = name, .version = .{ .minor = 1 } },
         .debug = @import("builtin").mode == .Debug,
     });
-    defer Saturn.deinit();
+    defer saturn.deinit();
+
+    const window_size: saturn.WindowSize =
+        if (std.process.hasEnvVar(gpa, "FULLSCREEN") catch false)
+            .fullscreen
+        else
+            .{ .windowed = .{ 1600, 900 } };
 
     const window = try platform.createWindow(.{
         .name = name,
-        .size = .{ .windowed = .{ 1600, 900 } },
-        .resizeable = false,
+        .size = window_size,
+        .resizeable = true,
     });
     defer platform.destroyWindow(window);
 
-    const power_preferance: Saturn.Device.PowerPreferance =
+    const power_preferance: saturn.DevicePowerPreferance =
         if (std.process.hasEnvVar(gpa, "PREFER_HIGH_POWER") catch false)
             .prefer_high_power
         else
@@ -76,7 +83,7 @@ pub fn main() !void {
 
     std.log.info("Selected Device: {f}", .{device.getInfo()});
 
-    const RenderTargetFormat: Saturn.Texture.Format = .bgra8_unorm;
+    const RenderTargetFormat: saturn.TextureFormat = .bgra8_unorm;
 
     try device.claimWindow(
         window,
@@ -89,11 +96,15 @@ pub fn main() !void {
     );
     defer device.releaseWindow(window);
 
-    const vertex_shader_code = try std.fs.cwd().readFileAllocOptions(gpa, "examples/triangle/triangle.vert.spv", std.math.maxInt(u32), null, .of(u32), null);
+    const vertex_shader_code_bytes = @embedFile("triangle.vert.spv");
+    const vertex_shader_code = try gpa.alignedAlloc(u8, .of(u32), vertex_shader_code_bytes.len);
     defer gpa.free(vertex_shader_code);
+    @memcpy(vertex_shader_code, vertex_shader_code_bytes);
 
-    const fragment_shader_code = try std.fs.cwd().readFileAllocOptions(gpa, "examples/triangle/triangle.frag.spv", std.math.maxInt(u32), null, .of(u32), null);
-    defer gpa.free(fragment_shader_code);
+    const fragment_shader_code_bytes = @embedFile("triangle.frag.spv");
+    const fragment_shader_code = try gpa.alignedAlloc(u8, .of(u32), fragment_shader_code_bytes.len);
+    defer gpa.free(vertex_shader_code);
+    @memcpy(fragment_shader_code, fragment_shader_code_bytes);
 
     const triangle_vertex_shader = try device.createShaderModule(.{
         .code = std.mem.bytesAsSlice(u32, vertex_shader_code),
@@ -105,7 +116,7 @@ pub fn main() !void {
     });
     defer device.destroyShaderModule(triangle_fragment_shader);
 
-    const triangle_pipeline: Saturn.GraphicsPipeline.Handle = try device.createGraphicsPipeline(.{
+    const triangle_pipeline: saturn.GraphicsPipelineHandle = try device.createGraphicsPipeline(.{
         .color_formats = &.{RenderTargetFormat},
         .vertex = triangle_vertex_shader,
         .fragment = triangle_fragment_shader,
@@ -164,7 +175,7 @@ pub fn main() !void {
             }
         }
 
-        var builder = Saturn.RenderGraph.Builder.init(tpa);
+        var builder = saturn.RenderGraphBuilder.init(tpa);
         defer builder.deinit();
 
         const uniform_buffer_handle = try builder.importBuffer(uniform_buffer);
@@ -199,23 +210,21 @@ pub fn main() !void {
 }
 
 const UpdateCallbackData = struct {
-    uniform_buffer_handle: Saturn.RenderGraph.BufferIndex,
+    uniform_buffer_handle: saturn.RenderGraphBufferIndex,
     rotation: f32,
 };
 
-fn updateCallback(ctx: ?*anyopaque, encoder: Saturn.TransferCommandEncoder) void {
-    _ = encoder; // autofix
+fn updateCallback(ctx: ?*anyopaque, encoder: saturn.TransferCommandEncoder) void {
     const callback_data: *UpdateCallbackData = @ptrCast(@alignCast(ctx.?));
-    _ = callback_data; // autofix
-    //encoder.updateBuffer(callback_data.uniform_buffer_handle, 0, &std.mem.toBytes(callback_data.rotation));
+    encoder.updateBuffer(callback_data.uniform_buffer_handle, 0, &std.mem.toBytes(callback_data.rotation));
 }
 
 const RenderCallbackData = struct {
-    pipeline: Saturn.GraphicsPipeline.Handle,
+    pipeline: saturn.GraphicsPipelineHandle,
     rotation: f32,
 };
 
-fn renderCallback(ctx: ?*anyopaque, encoder: Saturn.GraphicsCommandEncoder) void {
+fn renderCallback(ctx: ?*anyopaque, encoder: saturn.GraphicsCommandEncoder) void {
     const callback_data: *RenderCallbackData = @ptrCast(@alignCast(ctx.?));
     encoder.setPipeline(callback_data.pipeline);
     encoder.setPushData(0, &callback_data.rotation);

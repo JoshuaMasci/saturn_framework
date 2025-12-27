@@ -28,9 +28,9 @@ const Self = @This();
 
 name: []const u8,
 device_id: u32, // PCI device ID
-vendor_id: saturn.Device.VendorID, // PCI vendor ID / Metal device registry ID
+vendor_id: saturn.DeviceVendorID, // PCI vendor ID / Metal device registry ID
 driver_version: u32,
-type: saturn.Device.Type,
+type: saturn.DeviceType,
 
 memory: MemoryProperties = .{},
 queues: QueuesFamilies = .{},

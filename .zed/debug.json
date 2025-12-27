@@ -1,0 +1,12 @@
+[
+  {
+    "label": "Build Run Triangle",
+    "build": {
+      "command": "zig",
+      "args": ["build", "-Duse-llvm=true"],
+    },
+    "program": "$ZED_WORKTREE_ROOT/zig-out/bin/triangle",
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+]

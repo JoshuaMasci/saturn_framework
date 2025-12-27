@@ -30,7 +30,7 @@ pub const GraphicsCommandEncoder = struct {
         };
     }
 
-    fn setPipeline(ctx: *anyopaque, pipeline: saturn.GraphicsPipeline.Handle) void {
+    fn setPipeline(ctx: *anyopaque, pipeline: saturn.GraphicsPipelineHandle) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const vk_pipeline: vk.Pipeline = @enumFromInt(@intFromEnum(pipeline));
         self.command_buffer.bindPipeline(.graphics, vk_pipeline);
@@ -68,7 +68,7 @@ pub const GraphicsCommandEncoder = struct {
         self.command_buffer.setScissor(0, 1, &.{rect});
     }
 
-    fn setVertexBuffer(ctx: *anyopaque, slot: u32, buf: saturn.Buffer.Handle, offset: usize) void {
+    fn setVertexBuffer(ctx: *anyopaque, slot: u32, buf: saturn.BufferHandle, offset: usize) void {
         _ = slot; // autofix
         _ = buf; // autofix
         _ = offset; // autofix
@@ -77,7 +77,7 @@ pub const GraphicsCommandEncoder = struct {
         _ = self; // autofix
     }
 
-    fn setIndexBuffer(ctx: *anyopaque, buf: saturn.Buffer.Handle, offset: usize, index_type: saturn.IndexType) void {
+    fn setIndexBuffer(ctx: *anyopaque, buf: saturn.BufferHandle, offset: usize, index_type: saturn.IndexType) void {
         _ = buf; // autofix
         _ = offset; // autofix
         _ = index_type; // autofix
@@ -142,7 +142,7 @@ pub const TransferCommandEncoder = struct {
         };
     }
 
-    pub fn updateBuffer(ctx: *anyopaque, buf: saturn.RenderGraph.BufferIndex, offset: usize, data: []const u8) void {
+    pub fn updateBuffer(ctx: *anyopaque, buf: saturn.RenderGraphBufferIndex, offset: usize, data: []const u8) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const buffer = self.resources.buffers[buf.idx];
         self.command_buffer.updateBuffer(buffer.buffer.handle, offset, data.len, data.ptr);
