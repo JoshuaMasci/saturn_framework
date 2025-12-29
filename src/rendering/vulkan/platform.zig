@@ -197,6 +197,16 @@ pub const Device = struct {
             self.freed.pipelines.clearRetainingCapacity();
 
             for (self.freed.buffers.items) |buffer| {
+
+                //TODO: free here
+                // if (buffer.uniform_binding) |binding| {
+                //     self.descriptor.uniform_buffer_array.clear(binding);
+                // }
+
+                // if (buffer.storage_binding) |binding| {
+                //     self.descriptor.storage_buffer_array.clear(binding);
+                // }
+
                 buffer.deinit(device);
             }
             self.freed.buffers.clearRetainingCapacity();
@@ -367,6 +377,7 @@ pub const Device = struct {
                 .getInfo = getInfo,
                 .createBuffer = createBuffer,
                 .destroyBuffer = destroyBuffer,
+                .getBufferMappedSlice = getBufferMappedSlice,
                 .createTexture = createTexture,
                 .destroyTexture = destroyTexture,
                 .createShaderModule = createShaderModule,
@@ -413,6 +424,14 @@ pub const Device = struct {
         };
         errdefer buffer.deinit(self.device);
 
+        if (desc.usage.uniform) {
+            buffer.uniform_binding = self.descriptor.uniform_buffer_array.bind(buffer);
+        }
+
+        if (desc.usage.storage) {
+            buffer.storage_binding = self.descriptor.storage_buffer_array.bind(buffer);
+        }
+
         self.buffers.put(buffer.handle, buffer) catch return error.OutOfMemory;
 
         if (self.device.debug) {
@@ -432,9 +451,28 @@ pub const Device = struct {
 
         if (self.buffers.fetchRemove(vk_buffer)) |entry| {
             self.per_frame_data[self.frame_index].freed.buffers.append(self.gpa, entry.value) catch {
+                if (entry.value.uniform_binding) |binding| {
+                    self.descriptor.uniform_buffer_array.clear(binding);
+                }
+
+                if (entry.value.storage_binding) |binding| {
+                    self.descriptor.storage_buffer_array.clear(binding);
+                }
+
                 entry.value.deinit(self.device);
             };
         }
+    }
+
+    fn getBufferMappedSlice(ctx: *anyopaque, handle: saturn.BufferHandle) ?[]u8 {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const vk_buffer: vk.Buffer = @enumFromInt(@intFromEnum(handle));
+
+        if (self.buffers.get(vk_buffer)) |entry| {
+            return entry.allocation.getMappedByteSlice();
+        }
+
+        return null;
     }
 
     fn createTexture(ctx: *anyopaque, desc: saturn.TextureDesc) saturn.Error!saturn.TextureHandle {
@@ -653,6 +691,8 @@ pub const Device = struct {
             frame_data.frame_wait_fences.clearRetainingCapacity();
         }
         frame_data.reset(self.device);
+
+        self.descriptor.writeUpdates(tpa) catch return error.DeviceLost;
 
         const graph_resources = GraphResources.init(tpa, graph, self) catch return error.DeviceLost;
         defer graph_resources.deinit(tpa);

@@ -1,13 +1,23 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : enable
+
+#include "bindless.glsl"
+
+struct UniformData {
+    float rotation;
+};
+UNIFORM_BINDING(UniformData, uniform_data);
 
 layout(location = 0) out vec3 outColor;
 
 layout(push_constant) uniform PushConstants
 {
-    float rotation;
+    UboBinding uniform_binding;
 } push_constants;
 
 void main() {
+    const float rot = -UNIFORM_LOAD(uniform_data, push_constants.uniform_binding).rotation;
+
     vec2 pos[3] = vec2[3](
         vec2(0.0, -0.5),
         vec2(0.5, 0.5),
@@ -20,7 +30,6 @@ void main() {
     );
 
     //Rotation is super wonky cause this is in NDC space
-    float rot = push_constants.rotation;
     mat2 rot_mat = mat2(
         cos(rot), sin(rot),
         -sin(rot), cos(rot)

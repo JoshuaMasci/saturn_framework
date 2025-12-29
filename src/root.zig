@@ -510,6 +510,7 @@ pub const DeviceInterface = struct {
 
         createBuffer: *const fn (ctx: *anyopaque, desc: BufferDesc) Error!BufferHandle,
         destroyBuffer: *const fn (ctx: *anyopaque, handle: BufferHandle) void,
+        getBufferMappedSlice: *const fn (ctx: *anyopaque, handle: BufferHandle) ?[]u8,
 
         createTexture: *const fn (ctx: *anyopaque, desc: TextureDesc) Error!TextureHandle,
         destroyTexture: *const fn (ctx: *anyopaque, handle: TextureHandle) void,
@@ -544,6 +545,10 @@ pub const DeviceInterface = struct {
 
     pub fn createTexture(self: *const Self, desc: TextureDesc) Error!TextureHandle {
         return self.vtable.createTexture(self.ctx, desc);
+    }
+
+    pub fn getBufferMappedSlice(self: *const Self, handle: BufferHandle) ?[]u8 {
+        return self.vtable.getBufferMappedSlice(self.ctx, handle);
     }
 
     pub fn destroyTexture(self: *const Self, handle: TextureHandle) void {
@@ -594,6 +599,12 @@ pub const DeviceInterface = struct {
 // ----------------------------
 // Command Encoder Types
 // ----------------------------
+pub const GraphResource = union(enum) {
+    uniform_buffer: RenderGraphBufferIndex,
+    storage_buffer: RenderGraphBufferIndex,
+    sampled_texture: RenderGraphTextureIndex,
+    storage_texture: RenderGraphTextureIndex,
+};
 
 pub const GraphicsCommandEncoder = struct {
     const Self = @This();
@@ -610,7 +621,7 @@ pub const GraphicsCommandEncoder = struct {
         setVertexBuffer: *const fn (ctx: *anyopaque, slot: u32, buf: BufferHandle, offset: usize) void,
         setIndexBuffer: *const fn (ctx: *anyopaque, buf: BufferHandle, offset: usize, index_type: IndexType) void,
 
-        setPushData: *const fn (ctx: *anyopaque, offset: u32, data: []const u8) void,
+        pushResources: *const fn (ctx: *anyopaque, resources: []const GraphResource) void,
 
         draw: *const fn (ctx: *anyopaque, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) void,
         drawIndexed: *const fn (ctx: *anyopaque, index_count: u32, instance_count: u32, first_index: u32, vertex_offset: i32, first_instance: u32) void,
@@ -620,9 +631,8 @@ pub const GraphicsCommandEncoder = struct {
         self.vtable.setPipeline(self.ctx, pipeline);
     }
 
-    // Not sure if push constants will be removed from this api yet
-    pub fn setPushData(self: Self, offset: u32, data: anytype) void {
-        self.vtable.setPushData(self.ctx, offset, std.mem.asBytes(data));
+    pub fn pushResources(self: Self, resources: []const GraphResource) void {
+        self.vtable.pushResources(self.ctx, resources);
     }
 
     pub fn draw(self: Self, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) void {

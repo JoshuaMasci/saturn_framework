@@ -3,12 +3,16 @@ const vk = @import("vulkan");
 
 const Device = @import("device.zig");
 const GpuAllocator = @import("gpu_allocator.zig");
+const Binding = @import("bindless_descriptor.zig").Binding;
 
 const Self = @This();
 
 handle: vk.Buffer,
 allocation: GpuAllocator.Allocation,
 size: vk.DeviceSize,
+
+uniform_binding: ?Binding = null,
+storage_binding: ?Binding = null,
 
 pub fn init(
     device: *Device,

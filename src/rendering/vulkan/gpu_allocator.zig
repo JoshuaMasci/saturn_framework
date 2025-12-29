@@ -32,6 +32,7 @@ physical_device: vk.PhysicalDevice,
 instance: vk.InstanceProxy,
 device: vk.DeviceProxy,
 memory_properties: vk.PhysicalDeviceMemoryProperties,
+unified_memory: bool,
 
 total_requested_bytes: usize = 0,
 
@@ -41,11 +42,34 @@ pub fn init(
     device: vk.DeviceProxy,
 ) Self {
     const memory_properties = instance.getPhysicalDeviceMemoryProperties(physical_device);
+
+    // Check if all device memory mappable
+    var device_local_bytes: u64 = 0;
+    var device_local_host_visible_bytes: u64 = 0;
+    for (memory_properties.memory_heaps[0..memory_properties.memory_heap_count], 0..) |heap, i| {
+        const device_local = heap.flags.device_local_bit;
+        var host_visible = false;
+        for (memory_properties.memory_types[0..memory_properties.memory_type_count]) |mtype| {
+            if (mtype.heap_index == i and (mtype.property_flags.host_visible_bit and mtype.property_flags.host_coherent_bit)) {
+                host_visible = true;
+                break;
+            }
+        }
+
+        if (device_local and host_visible) {
+            device_local_host_visible_bytes += heap.size;
+        }
+        if (device_local) {
+            device_local_bytes += heap.size;
+        }
+    }
+
     return .{
         .physical_device = physical_device,
         .instance = instance,
         .device = device,
         .memory_properties = memory_properties,
+        .unified_memory = device_local_bytes == device_local_host_visible_bytes,
     };
 }
 
@@ -58,13 +82,17 @@ pub fn alloc(
     requirements: vk.MemoryRequirements,
     location: MemoryLocation,
 ) !Allocation {
+    const memory_flags: vk.MemoryPropertyFlags = if (self.unified_memory)
+        .{ .device_local_bit = true, .host_visible_bit = true, .host_coherent_bit = true }
+    else switch (location) {
+        .gpu_mappable => .{ .device_local_bit = true, .host_visible_bit = true, .host_coherent_bit = true },
+        .gpu_only => .{ .device_local_bit = true },
+        .cpu_only => .{ .host_visible_bit = true, .host_coherent_bit = true },
+    };
+
     const memory_type_index = try self.findMemoryType(
         requirements.memory_type_bits,
-        switch (location) {
-            .gpu_mappable => .{ .device_local_bit = true, .host_visible_bit = true, .host_coherent_bit = true },
-            .gpu_only => .{ .device_local_bit = true },
-            .cpu_only => .{ .host_visible_bit = true, .host_coherent_bit = true },
-        },
+        memory_flags,
     );
 
     const alloc_info = vk.MemoryAllocateInfo{
@@ -76,12 +104,7 @@ pub fn alloc(
     const memory = try self.device.allocateMemory(&alloc_info, null);
 
     var mapped_ptr: ?*anyopaque = null;
-    if (self.memory_properties.memory_types[memory_type_index].property_flags.contains(
-        .{
-            .host_visible_bit = true,
-            .host_coherent_bit = true,
-        },
-    )) {
+    if (memory_flags.contains(.{ .host_visible_bit = true, .host_coherent_bit = true })) {
         mapped_ptr = try self.device.mapMemory(memory, offset, alloc_info.allocation_size, .{});
     }
 

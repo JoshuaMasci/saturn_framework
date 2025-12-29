@@ -23,7 +23,7 @@ pub const GraphicsCommandEncoder = struct {
                 .setScissor = setScissor,
                 .setVertexBuffer = setVertexBuffer,
                 .setIndexBuffer = setIndexBuffer,
-                .setPushData = setPushData,
+                .pushResources = pushResources,
                 .draw = draw,
                 .drawIndexed = drawIndexed,
             },
@@ -86,14 +86,31 @@ pub const GraphicsCommandEncoder = struct {
         _ = self; // autofix
     }
 
-    fn setPushData(ctx: *anyopaque, offset: u32, data: []const u8) void {
+    pub fn pushResources(ctx: *anyopaque, resources: []const saturn.GraphResource) void {
+        const MAX_RESOURCES: usize = 32;
+        std.debug.assert(resources.len <= MAX_RESOURCES);
+
         const self: *Self = @ptrCast(@alignCast(ctx));
+
+        var index_buffer: [MAX_RESOURCES]u32 = @splat(0);
+        const index_slice = index_buffer[0..resources.len];
+
+        for (index_slice, resources) |*index, resource| {
+            index.* = switch (resource) {
+                .uniform_buffer => |buffer| self.resources.buffers[buffer.idx].buffer.uniform_binding.?.asU32(),
+                .storage_buffer => |buffer| self.resources.buffers[buffer.idx].buffer.storage_binding.?.asU32(),
+                else => 0,
+            };
+        }
+
+        const index_bytes = std.mem.sliceAsBytes(index_slice);
+
         self.command_buffer.pushConstants(
             self.device.pipeline_layout,
             self.device.device.all_stage_flags,
-            offset,
-            @intCast(data.len),
-            data.ptr,
+            0,
+            @intCast(index_bytes.len),
+            index_bytes.ptr,
         );
     }
 

@@ -103,7 +103,7 @@ pub fn main() !void {
 
     const fragment_shader_code_bytes = @embedFile("triangle.frag.spv");
     const fragment_shader_code = try gpa.alignedAlloc(u8, .of(u32), fragment_shader_code_bytes.len);
-    defer gpa.free(vertex_shader_code);
+    defer gpa.free(fragment_shader_code);
     @memcpy(fragment_shader_code, fragment_shader_code_bytes);
 
     const triangle_vertex_shader = try device.createShaderModule(.{
@@ -130,19 +130,6 @@ pub fn main() !void {
         .memory = .cpu_to_gpu,
     });
     defer device.destroyBuffer(uniform_buffer);
-
-    if (device.createTexture(.{
-        .width = 1920,
-        .height = 1080,
-        .format = .bc7_rgba_srgb,
-        .usage = .{ .sampled = true, .transfer = true },
-        .name = "test_texture",
-        .memory = .gpu_only,
-    })) |texture| {
-        device.destroyTexture(texture);
-    } else |err| {
-        std.log.err("Failed to create texture: {}", .{err});
-    }
 
     var rotation: f32 = 0;
 
@@ -191,11 +178,11 @@ pub fn main() !void {
 
         var render_callback_ctx: RenderCallbackData = .{
             .pipeline = triangle_pipeline,
-            .rotation = rotation,
+            .uniform_buffer_handle = uniform_buffer_handle,
         };
 
         const swapchain_texture = try builder.importWindow(window);
-        var swapchain_pass = try builder.beginPass(.initCStr("Swapchain Pass"));
+        var swapchain_pass = try builder.beginPass(.initCStr("Triangle Pass"));
         swapchain_pass.buffer_usages.add(.{ .buffer = uniform_buffer_handle, .usage = .none });
         swapchain_pass.render_target = .{};
         swapchain_pass.render_target.?.color_attachemnts.add(.{ .texture = swapchain_texture, .clear = @splat(0.25) });
@@ -221,12 +208,12 @@ fn updateCallback(ctx: ?*anyopaque, encoder: saturn.TransferCommandEncoder) void
 
 const RenderCallbackData = struct {
     pipeline: saturn.GraphicsPipelineHandle,
-    rotation: f32,
+    uniform_buffer_handle: saturn.RenderGraphBufferIndex,
 };
 
 fn renderCallback(ctx: ?*anyopaque, encoder: saturn.GraphicsCommandEncoder) void {
     const callback_data: *RenderCallbackData = @ptrCast(@alignCast(ctx.?));
     encoder.setPipeline(callback_data.pipeline);
-    encoder.setPushData(0, &callback_data.rotation);
+    encoder.pushResources(&.{.{ .uniform_buffer = callback_data.uniform_buffer_handle }});
     encoder.draw(3, 1, 0, 0);
 }

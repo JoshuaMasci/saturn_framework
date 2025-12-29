@@ -120,11 +120,11 @@ pub fn deinit(self: *Self) void {
     self.storage_image_array.deinit();
 }
 
-pub fn write_updates(self: *Self, temp_allocator: std.mem.Allocator) !void {
-    try self.uniform_buffer_array.write_updates(temp_allocator);
-    try self.storage_buffer_array.write_updates(temp_allocator);
-    try self.sampled_image_array.write_updates(temp_allocator);
-    try self.storage_image_array.write_updates(temp_allocator);
+pub fn writeUpdates(self: *Self, temp_allocator: std.mem.Allocator) !void {
+    try self.uniform_buffer_array.writeUpdates(temp_allocator);
+    try self.storage_buffer_array.writeUpdates(temp_allocator);
+    try self.sampled_image_array.writeUpdates(temp_allocator);
+    try self.storage_image_array.writeUpdates(temp_allocator);
 }
 
 pub fn bind(self: Self, command_buffer: vk.CommandBufferProxy, layout: vk.PipelineLayout) void {
@@ -145,13 +145,19 @@ pub fn bind(self: Self, command_buffer: vk.CommandBufferProxy, layout: vk.Pipeli
 pub const Binding = struct {
     binding: u16,
     index: u16,
+
+    pub fn asU32(self: Binding) u32 {
+        const low: u32 = @intCast(self.binding);
+        const high: u32 = @intCast(self.index);
+        return high << 16 | low;
+    }
 };
 
 const BufferDescriptor = struct {
     device: *Device,
     set: vk.DescriptorSet,
 
-    descriptor_index: u32,
+    descriptor_index: u16,
     descriptor_type: vk.DescriptorType,
 
     allocator: std.mem.Allocator,
@@ -162,7 +168,7 @@ const BufferDescriptor = struct {
         allocator: std.mem.Allocator,
         device: *Device,
         set: vk.DescriptorSet,
-        descriptor_index: u32,
+        descriptor_index: u16,
         descriptor_type: vk.DescriptorType,
         array_count: u16,
     ) BufferDescriptor {
@@ -201,7 +207,7 @@ const BufferDescriptor = struct {
         }) catch |err| std.log.info("Failed to free descriptor binding {}:{} {}", .{ self.descriptor_index, binding.index, err });
     }
 
-    pub fn write_updates(self: *BufferDescriptor, temp_allocator: std.mem.Allocator) !void {
+    pub fn writeUpdates(self: *BufferDescriptor, temp_allocator: std.mem.Allocator) !void {
         const buffer_infos = self.update_list.values();
         const indexes = self.update_list.keys();
         const descriptor_writes = try temp_allocator.alloc(vk.WriteDescriptorSet, self.update_list.count());
@@ -228,7 +234,7 @@ const ImageDescriptor = struct {
     device: *Device,
     set: vk.DescriptorSet,
 
-    descriptor_index: u32,
+    descriptor_index: u16,
     descriptor_type: vk.DescriptorType,
     image_layout: vk.ImageLayout,
 
@@ -240,7 +246,7 @@ const ImageDescriptor = struct {
         allocator: std.mem.Allocator,
         device: *Device,
         set: vk.DescriptorSet,
-        descriptor_index: u32,
+        descriptor_index: u16,
         descriptor_type: vk.DescriptorType,
         image_layout: vk.ImageLayout,
         array_count: u16,
@@ -281,7 +287,7 @@ const ImageDescriptor = struct {
         }) catch |err| std.log.info("Failed to free descriptor binding {}:{} {}", .{ self.descriptor_index, binding.index, err });
     }
 
-    pub fn write_updates(self: *ImageDescriptor, temp_allocator: std.mem.Allocator) !void {
+    pub fn writeUpdates(self: *ImageDescriptor, temp_allocator: std.mem.Allocator) !void {
         const buffer_infos = self.update_list.values();
         const indexes = self.update_list.keys();
         const descriptor_writes = try temp_allocator.alloc(vk.WriteDescriptorSet, self.update_list.count());

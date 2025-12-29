@@ -22,14 +22,22 @@ pub const PipelineBarrier = struct {
     }
 
     pub fn cmd(self: PipelineBarrier, command_buffer: vk.CommandBufferProxy) void {
-        command_buffer.pipelineBarrier2(&.{
-            .memory_barrier_count = @intCast(self.memory_barriers.items.len),
-            .p_memory_barriers = self.memory_barriers.items.ptr,
-            .buffer_memory_barrier_count = @intCast(self.buffer.items.len),
-            .p_buffer_memory_barriers = self.buffer.items.ptr,
-            .image_memory_barrier_count = @intCast(self.texture.items.len),
-            .p_image_memory_barriers = self.texture.items.ptr,
-        });
+        if (self.memory_barriers.items.len + self.buffer.items.len + self.texture.items.len != 0) {
+            for (self.buffer.items) |buf| {
+                if (buf.src_access_mask.host_read_bit) {
+                    std.debug.panic("Dst access: {any}", .{buf.dst_access_mask});
+                }
+            }
+
+            command_buffer.pipelineBarrier2(&.{
+                .memory_barrier_count = @intCast(self.memory_barriers.items.len),
+                .p_memory_barriers = self.memory_barriers.items.ptr,
+                .buffer_memory_barrier_count = @intCast(self.buffer.items.len),
+                .p_buffer_memory_barriers = self.buffer.items.ptr,
+                .image_memory_barrier_count = @intCast(self.texture.items.len),
+                .p_image_memory_barriers = self.texture.items.ptr,
+            });
+        }
     }
 };
 
