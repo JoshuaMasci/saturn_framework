@@ -6,6 +6,9 @@ const config = @import("src/config.zig");
 pub fn build(b: *std.Build) void {
     const options = b.addOptions();
 
+    const examples = b.option(bool, "examples", "Compiles example projects") orelse false;
+    _ = examples; // autofix
+
     const build_sdl3 = b.option(bool, "build-sdl3", "Compiles SDL3 from source") orelse false;
 
     const platform = b.option(config.Platform, "platform", "Force use of specific platform implementation") orelse .default;
@@ -49,27 +52,38 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
 
-    //Triangle test
-    {
-        const use_llvm: ?bool = b.option(bool, "use-llvm", "Compile using llvm") orelse null;
+    const use_llvm: ?bool = b.option(bool, "use-llvm", "Compile using llvm");
+    buildExample(b, target, optimize, root_module, "triangle", "examples/triangle/main.zig", use_llvm);
+    buildExample(b, target, optimize, root_module, "cube", "examples/cube/main.zig", use_llvm);
+}
 
-        const exe_mod = b.createModule(.{
-            .root_source_file = b.path("examples/triangle/triangle.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        exe_mod.addImport("saturn", root_module);
+fn buildExample(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    saturn: *std.Build.Module,
+    comptime exe_name: []const u8,
+    root_path: []const u8,
+    use_llvm: ?bool,
+) void {
+    const exe_mod = b.createModule(.{
+        .root_source_file = b.path(root_path),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("saturn", saturn);
 
-        const exe = b.addExecutable(.{
-            .name = "triangle",
-            .root_module = exe_mod,
-            .use_llvm = use_llvm,
-        });
-        b.installArtifact(exe);
+    const exe = b.addExecutable(.{
+        .name = exe_name,
+        .root_module = exe_mod,
+        .use_llvm = use_llvm,
+    });
+    b.installArtifact(exe);
 
-        const run_step = b.step("run", "Run the triangle exampl");
-        const run_cmd = b.addRunArtifact(exe);
-        run_step.dependOn(&run_cmd.step);
-        run_cmd.step.dependOn(b.getInstallStep());
-    }
+    const run_string = "run-" ++ exe_name;
+    const run_desc = "Run the " ++ exe_name ++ "example";
+    const run_step = b.step(run_string, run_desc);
+    const run_cmd = b.addRunArtifact(exe);
+    run_step.dependOn(&run_cmd.step);
+    run_cmd.step.dependOn(b.getInstallStep());
 }

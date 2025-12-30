@@ -17,10 +17,13 @@ uint getIndex(uint handle)
     return (handle >> 16) & 0xFFFFu;
 }
 
-#define UNIFORM_BINDING(TYPE, NAME)          \
-layout(set = BINDLESS_SET, binding = UBO_BINDING_INDEX) uniform TYPE##_Buffer {   \
-    TYPE data;                                                  \
+#define UNIFORM_BINDING(TYPE, NAME) \
+layout(set = BINDLESS_SET, binding = UBO_BINDING_INDEX) uniform TYPE##_Buffer { \
+    TYPE data; \
 } NAME[]
 
 #define UNIFORM_LOAD(ARRAY, HANDLE) \
+    ARRAY[getIndex(HANDLE)].data
+
+#define NON_UNIFORM_LOAD(ARRAY, HANDLE) \
     ARRAY[nonuniformEXT(getIndex(HANDLE))].data

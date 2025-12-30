@@ -87,8 +87,8 @@ pub const RenderingBackend = enum {
 
 pub const PlatformDesc = struct {
     app_info: AppInfo,
-    debug: bool = false,
     force_rendering_backend: ?RenderingBackend = null,
+    validation: bool,
 };
 
 pub const PlatformCallbacks = struct {
@@ -188,7 +188,15 @@ pub const PlatformInterface = struct {
         }
 
         const selected_device = selected_device_opt orelse return null;
-        const device_interface: DeviceInterface = self.vtable.createDevice(self.ctx, selected_device.info.physical_device_index, .{}) catch |err| return err;
+        const device_interface: DeviceInterface = self.vtable.createDevice(
+            self.ctx,
+            selected_device.info.physical_device_index,
+            .{
+                .frames_in_flight = if (selected_device.info.type == .discrete) 3 else 2,
+                .queues = selected_device.info.queues,
+                .features = selected_device.info.features,
+            },
+        ) catch |err| return err;
         return device_interface;
     }
 
@@ -351,6 +359,7 @@ pub const TextureUsage = struct {
     storage: bool = false,
     attachment: bool = false,
     transfer: bool = false,
+    host_transfer: bool = false,
 };
 
 // ----------------------------
@@ -405,7 +414,9 @@ pub const DevicePowerPreferance = enum {
 };
 
 pub const DeviceDesc = struct {
-    frames_in_flight: u32 = 2,
+    frames_in_flight: u32,
+    queues: DeviceQueues,
+    features: DeviceFeatures,
 };
 
 pub const DeviceType = enum {
@@ -448,6 +459,7 @@ pub const DeviceQueues = struct {
 pub const DeviceFeatures = struct {
     mesh_shading: bool,
     ray_tracing: bool,
+    host_image_copy: bool,
 };
 
 pub const DeviceMemory = struct {
@@ -514,6 +526,8 @@ pub const DeviceInterface = struct {
 
         createTexture: *const fn (ctx: *anyopaque, desc: TextureDesc) Error!TextureHandle,
         destroyTexture: *const fn (ctx: *anyopaque, handle: TextureHandle) void,
+        canUploadTexture: *const fn (ctx: *anyopaque, handle: TextureHandle) bool,
+        uploadTexture: *const fn (ctx: *anyopaque, handle: TextureHandle, data: []const u8) Error!void,
 
         createShaderModule: *const fn (ctx: *anyopaque, desc: Shader.Desc) Error!Shader.Handle,
         destroyShaderModule: *const fn (ctx: *anyopaque, handle: Shader.Handle) void,
@@ -543,16 +557,24 @@ pub const DeviceInterface = struct {
         self.vtable.destroyBuffer(self.ctx, handle);
     }
 
-    pub fn createTexture(self: *const Self, desc: TextureDesc) Error!TextureHandle {
-        return self.vtable.createTexture(self.ctx, desc);
-    }
-
     pub fn getBufferMappedSlice(self: *const Self, handle: BufferHandle) ?[]u8 {
         return self.vtable.getBufferMappedSlice(self.ctx, handle);
     }
 
+    pub fn createTexture(self: *const Self, desc: TextureDesc) Error!TextureHandle {
+        return self.vtable.createTexture(self.ctx, desc);
+    }
+
     pub fn destroyTexture(self: *const Self, handle: TextureHandle) void {
         self.vtable.destroyTexture(self.ctx, handle);
+    }
+
+    pub fn canUploadTexture(self: *const Self, handle: TextureHandle) bool {
+        return self.vtable.canUploadTexture(self.ctx, handle);
+    }
+
+    pub fn uploadTexture(self: *const Self, handle: TextureHandle, data: []const u8) Error!void {
+        return self.vtable.uploadTexture(self.ctx, handle, data);
     }
 
     pub fn createShaderModule(self: *const Self, desc: Shader.Desc) Error!Shader.Handle {

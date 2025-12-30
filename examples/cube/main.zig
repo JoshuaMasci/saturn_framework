@@ -23,8 +23,10 @@ fn gamepadConnectedCallback(ctx: ?*anyopaque, gamepad_id: u32) void {
 }
 
 fn gamepadButtonCallback(ctx: ?*anyopaque, gamepad_id: u32, button: saturn.GamepadButton, state: saturn.ButtonState) void {
+    _ = gamepad_id; // autofix
+    _ = button; // autofix
+    _ = state; // autofix
     _ = ctx; // autofix
-    std.log.info("Gamepad({}) Button: {} -> {}", .{ gamepad_id, button, state });
 }
 
 fn gamepadAxisCallback(ctx: ?*anyopaque, gamepad_id: u32, axis: saturn.GamepadAxis, value: f32) void {
@@ -32,13 +34,13 @@ fn gamepadAxisCallback(ctx: ?*anyopaque, gamepad_id: u32, axis: saturn.GamepadAx
     _ = gamepad_id; // autofix
 
     switch (axis) {
-        .right_x => axis_values[0] = value,
-        .right_y => axis_values[1] = value,
+        .right_x => right_stick_values[0] = value,
+        .right_y => right_stick_values[1] = value,
         else => {},
     }
 }
 
-var axis_values: [2]f32 = @splat(0.0);
+var right_stick_values: [2]f32 = @splat(0.0);
 
 pub fn main() !void {
     var debug_allocator = std.heap.DebugAllocator(.{ .enable_memory_limit = true }){};
@@ -52,10 +54,10 @@ pub fn main() !void {
 
     const tpa = arena_allocator.allocator();
 
-    const name = "Triangle Demo";
+    const name = "Cube Demo";
     var platform = try saturn.init(gpa, .{
         .app_info = .{ .name = name, .version = .{ .minor = 1 } },
-        .debug = @import("builtin").mode == .Debug,
+        .validation = @import("builtin").mode == .Debug,
     });
     defer saturn.deinit();
 
@@ -83,6 +85,23 @@ pub fn main() !void {
 
     std.log.info("Selected Device: {f}", .{device.getInfo()});
 
+    const ppm_texture = try readRgbaPpm(gpa, @embedFile("texture.ppm"));
+    defer gpa.free(ppm_texture.data);
+    std.log.info("Texture Loaded: {}x{}", .{ ppm_texture.width, ppm_texture.height });
+
+    const sampled_texture = try device.createTexture(.{
+        .name = "sampled_texture",
+        .width = ppm_texture.width,
+        .height = ppm_texture.height,
+        .format = .rgba8_unorm,
+        .usage = .{ .sampled = true, .transfer = true, .host_transfer = true },
+        .memory = .gpu_only,
+    });
+    defer device.destroyTexture(sampled_texture);
+
+    std.debug.assert(device.canUploadTexture(sampled_texture));
+    try device.uploadTexture(sampled_texture, ppm_texture.data);
+
     const RenderTargetFormat: saturn.TextureFormat = .bgra8_unorm;
 
     try device.claimWindow(
@@ -96,33 +115,6 @@ pub fn main() !void {
     );
     defer device.releaseWindow(window);
 
-    const vertex_shader_code_bytes = @embedFile("triangle.vert.spv");
-    const vertex_shader_code = try gpa.alignedAlloc(u8, .of(u32), vertex_shader_code_bytes.len);
-    defer gpa.free(vertex_shader_code);
-    @memcpy(vertex_shader_code, vertex_shader_code_bytes);
-
-    const fragment_shader_code_bytes = @embedFile("triangle.frag.spv");
-    const fragment_shader_code = try gpa.alignedAlloc(u8, .of(u32), fragment_shader_code_bytes.len);
-    defer gpa.free(fragment_shader_code);
-    @memcpy(fragment_shader_code, fragment_shader_code_bytes);
-
-    const triangle_vertex_shader = try device.createShaderModule(.{
-        .code = std.mem.bytesAsSlice(u32, vertex_shader_code),
-    });
-    defer device.destroyShaderModule(triangle_vertex_shader);
-
-    const triangle_fragment_shader = try device.createShaderModule(.{
-        .code = std.mem.bytesAsSlice(u32, fragment_shader_code),
-    });
-    defer device.destroyShaderModule(triangle_fragment_shader);
-
-    const triangle_pipeline: saturn.GraphicsPipelineHandle = try device.createGraphicsPipeline(.{
-        .color_formats = &.{RenderTargetFormat},
-        .vertex = triangle_vertex_shader,
-        .fragment = triangle_fragment_shader,
-    });
-    defer device.destroyGraphicsPipeline(triangle_pipeline);
-
     const uniform_buffer = try device.createBuffer(.{
         .name = "uniform_buffer",
         .size = 16,
@@ -130,8 +122,6 @@ pub fn main() !void {
         .memory = .cpu_to_gpu,
     });
     defer device.destroyBuffer(uniform_buffer);
-
-    var rotation: f32 = 0;
 
     while (is_running) {
         _ = arena_allocator.reset(.retain_capacity);
@@ -145,30 +135,12 @@ pub fn main() !void {
             .gamepad_axis = gamepadAxisCallback,
         });
 
-        //Update triangle rotation
-        {
-            const axis_len = std.math.sqrt((axis_values[0] * axis_values[0]) + (axis_values[1] * axis_values[1]));
-            if (axis_len > 0.25) {
-                const new_rotation = std.math.atan2(axis_values[1], -axis_values[0]) + (std.math.pi / 2.0);
-                const distance = new_rotation - rotation;
-
-                if (@abs(distance) > std.math.pi) {
-                    rotation = new_rotation;
-                } else {
-                    rotation = std.math.lerp(rotation, new_rotation, 0.5);
-                }
-
-                rotation = std.math.lerp(rotation, new_rotation, 0.5);
-            }
-        }
-
         var builder = saturn.RenderGraphBuilder.init(tpa);
         defer builder.deinit();
 
         const uniform_buffer_handle = try builder.importBuffer(uniform_buffer);
         var update_callback_ctx: UpdateCallbackData = .{
             .uniform_buffer_handle = uniform_buffer_handle,
-            .rotation = rotation,
         };
 
         var update_pass = try builder.beginPass(.initCStr("Update Buffer Pass"));
@@ -177,17 +149,16 @@ pub fn main() !void {
         try update_pass.end();
 
         var render_callback_ctx: RenderCallbackData = .{
-            .pipeline = triangle_pipeline,
             .uniform_buffer_handle = uniform_buffer_handle,
         };
 
         const swapchain_texture = try builder.importWindow(window);
-        var swapchain_pass = try builder.beginPass(.initCStr("Triangle Pass"));
-        swapchain_pass.buffer_usages.add(.{ .buffer = uniform_buffer_handle, .usage = .none });
-        swapchain_pass.render_target = .{};
-        swapchain_pass.render_target.?.color_attachemnts.add(.{ .texture = swapchain_texture, .clear = @splat(0.25) });
-        swapchain_pass.render_callback = .{ .ctx = @ptrCast(&render_callback_ctx), .callback = renderCallback };
-        try swapchain_pass.end();
+        var render_pass = try builder.beginPass(.initCStr("Cube Pass"));
+        render_pass.render_target = .{};
+        render_pass.render_target.?.color_attachemnts.add(.{ .texture = swapchain_texture, .clear = @splat(0.25) });
+        render_pass.buffer_usages.add(.{ .buffer = uniform_buffer_handle, .usage = .none });
+        render_pass.render_callback = .{ .ctx = @ptrCast(&render_callback_ctx), .callback = renderCallback };
+        try render_pass.end();
 
         const render_graph = builder.build();
 
@@ -198,22 +169,66 @@ pub fn main() !void {
 
 const UpdateCallbackData = struct {
     uniform_buffer_handle: saturn.RenderGraphBufferIndex,
-    rotation: f32,
 };
 
 fn updateCallback(ctx: ?*anyopaque, encoder: saturn.TransferCommandEncoder) void {
+    _ = encoder; // autofix
     const callback_data: *UpdateCallbackData = @ptrCast(@alignCast(ctx.?));
-    encoder.updateBuffer(callback_data.uniform_buffer_handle, 0, &std.mem.toBytes(callback_data.rotation));
+    _ = callback_data; // autofix
 }
 
 const RenderCallbackData = struct {
-    pipeline: saturn.GraphicsPipelineHandle,
     uniform_buffer_handle: saturn.RenderGraphBufferIndex,
 };
 
 fn renderCallback(ctx: ?*anyopaque, encoder: saturn.GraphicsCommandEncoder) void {
+    _ = encoder; // autofix
     const callback_data: *RenderCallbackData = @ptrCast(@alignCast(ctx.?));
-    encoder.setPipeline(callback_data.pipeline);
-    encoder.pushResources(&.{.{ .uniform_buffer = callback_data.uniform_buffer_handle }});
-    encoder.draw(3, 1, 0, 0);
+    _ = callback_data; // autofix
+}
+
+//Super basic ppm loader, doesnt support comments
+fn readRgbaPpm(gpa: std.mem.Allocator, data: []const u8) !struct {
+    width: u32,
+    height: u32,
+    data: []const u8,
+} {
+    //Expected header "P6.{WIDTH} {HEIGHT}.255"
+
+    const MAGIC: []const u8 = "P6\n";
+    const TAIL: []const u8 = "\n255";
+
+    const magic: []const u8 = data[0..MAGIC.len];
+    if (!std.mem.eql(u8, magic, MAGIC)) {
+        return error.InvalidMagic;
+    }
+
+    const end_pos = std.mem.indexOf(u8, data[0..20], TAIL) orelse return error.InvaildHeader;
+    const dim_str = data[MAGIC.len..end_pos];
+    var dim_split = std.mem.splitAny(u8, dim_str, " ");
+    const width_str = dim_split.next() orelse return error.InvaildHeader;
+    const height_str = dim_split.next() orelse return error.InvaildHeader;
+
+    const width = try std.fmt.parseInt(u32, width_str, 10);
+    const height = try std.fmt.parseInt(u32, height_str, 10);
+    const pixel_count = width * height;
+
+    const rgba_data = try gpa.alloc(u8, pixel_count * 4);
+    errdefer gpa.free(rgba_data);
+
+    const rgb_data: []const u8 = data[end_pos..];
+
+    for (0..pixel_count) |idx| {
+        const rgb_idx = idx * 3;
+        const rgba_idx = idx * 4;
+
+        @memcpy(rgba_data[rgba_idx..(rgba_idx + 3)], rgb_data[rgb_idx..(rgb_idx + 3)]);
+        rgba_data[rgba_idx + 3] = 0;
+    }
+
+    return .{
+        .width = width,
+        .height = height,
+        .data = rgba_data,
+    };
 }

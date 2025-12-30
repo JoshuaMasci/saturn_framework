@@ -56,7 +56,7 @@ pub fn init(gpa: std.mem.Allocator, desc: saturn.PlatformDesc) saturn.Error!Self
         null,
         desc.app_info,
         desc.app_info,
-        desc.debug,
+        desc.validation,
     );
     errdefer backend.deinit();
 

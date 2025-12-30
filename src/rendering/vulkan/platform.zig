@@ -46,7 +46,7 @@ pub const Backend = struct {
         get_window_size_user_data: ?*anyopaque,
         engine: saturn.AppInfo,
         app: saturn.AppInfo,
-        debug: bool,
+        validation: bool,
     ) saturn.Error!Self {
         const instance = try gpa.create(Instance);
         errdefer gpa.destroy(instance);
@@ -62,7 +62,7 @@ pub const Backend = struct {
                 .application_version = app.version.toU32(),
                 .api_version = @bitCast(vk.API_VERSION_1_3),
             },
-            debug,
+            validation,
         ) catch return error.FailedToInitRenderingBackend;
         errdefer instance.deinit();
 
@@ -250,11 +250,25 @@ pub const Device = struct {
         var device = try gpa.create(VkDevice);
         errdefer gpa.destroy(device);
 
+        const physical_device = backend.instance.physical_devices[physical_device_index];
+
+        if (desc.features.ray_tracing and !physical_device.info.extensions.ray_tracing) {
+            return error.FeatureNotSupported;
+        }
+
+        if (desc.features.mesh_shading and !physical_device.info.extensions.mesh_shading) {
+            return error.FeatureNotSupported;
+        }
+
+        if (desc.features.host_image_copy and !physical_device.info.extensions.host_image_copy) {
+            return error.FeatureNotSupported;
+        }
+
         device.* = VkDevice.init(
             gpa,
             backend.instance.proxy,
-            backend.instance.physical_devices[physical_device_index],
-            .{},
+            physical_device,
+            desc.features,
             backend.instance.debug_messager != null,
         ) catch |err| {
             return switch (err) {
@@ -380,6 +394,8 @@ pub const Device = struct {
                 .getBufferMappedSlice = getBufferMappedSlice,
                 .createTexture = createTexture,
                 .destroyTexture = destroyTexture,
+                .canUploadTexture = canUploadTexture,
+                .uploadTexture = uploadTexture,
                 .createShaderModule = createShaderModule,
                 .destroyShaderModule = destroyShaderModule,
                 .createGraphicsPipeline = createGraphicsPipeline,
@@ -511,6 +527,33 @@ pub const Device = struct {
             self.per_frame_data[self.frame_index].freed.texture.append(self.gpa, entry.value) catch {
                 entry.value.deinit(self.device);
             };
+        }
+    }
+
+    fn canUploadTexture(ctx: *anyopaque, handle: saturn.TextureHandle) bool {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const vk_image: vk.Image = @enumFromInt(@intFromEnum(handle));
+
+        if (self.device.extensions.host_image_copy) {
+            if (self.textures.get(vk_image)) |texture| {
+                if (texture.usage.host_transfer_bit) {
+                    if (texture.allocation) |allocation| {
+                        return allocation.mapped_ptr != null;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    fn uploadTexture(ctx: *anyopaque, handle: saturn.TextureHandle, data: []const u8) saturn.Error!void {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        const vk_image: vk.Image = @enumFromInt(@intFromEnum(handle));
+        std.debug.assert(self.device.extensions.host_image_copy);
+
+        if (self.textures.get(vk_image)) |texture| {
+            texture.hostImageCopy(self.device, .shader_read_only_optimal, data) catch return error.Unknown;
         }
     }
 
@@ -751,6 +794,7 @@ fn getVkImageUsage(usage: saturn.TextureUsage) vk.ImageUsageFlags {
         .sampled_bit = usage.sampled,
         .storage_bit = usage.storage,
         .color_attachment_bit = usage.attachment,
+        .host_transfer_bit = usage.host_transfer,
     };
 }
 

@@ -103,6 +103,7 @@ pub fn init(
             .features = .{
                 .mesh_shading = physical_device.info.extensions.mesh_shading,
                 .ray_tracing = physical_device.info.extensions.ray_tracing,
+                .host_image_copy = physical_device.info.extensions.host_image_copy,
             },
         };
     }

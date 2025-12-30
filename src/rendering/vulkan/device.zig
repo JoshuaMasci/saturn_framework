@@ -2,15 +2,10 @@ const std = @import("std");
 
 const vk = @import("vulkan");
 
+const saturn = @import("../../root.zig");
 const GpuAllocator = @import("gpu_allocator.zig");
 const PhysicalDevice = @import("instance.zig").PhysicalDevice;
 const Queue = @import("queue.zig");
-
-const Exetensions = struct {
-    mesh_shading: bool = false,
-    raytracing: bool = false,
-    host_image_copy: bool = false,
-};
 
 const Self = @This();
 
@@ -24,7 +19,7 @@ graphics_queue: Queue, //Pretty much every device has a graphics queue (Graphics
 async_compute_queue: ?Queue,
 async_transfer_queue: ?Queue,
 
-extensions: Exetensions,
+extensions: saturn.DeviceFeatures,
 
 gpu_allocator: GpuAllocator,
 debug: bool = false,
@@ -35,7 +30,7 @@ pub fn init(
     allocator: std.mem.Allocator,
     instance: vk.InstanceProxy,
     physical_device: PhysicalDevice,
-    extentions: Exetensions,
+    extentions: saturn.DeviceFeatures,
     debug: bool,
 ) !Self {
     const queue_priority = [_]f32{1.0};
@@ -74,7 +69,7 @@ pub fn init(
         all_stage_flags.mesh_bit_ext = true;
     }
 
-    if (extentions.raytracing) {
+    if (extentions.ray_tracing) {
         std.debug.assert(physical_device.info.extensions.ray_tracing);
         try device_extentions.append(allocator, "VK_KHR_deferred_host_operations");
         try device_extentions.append(allocator, "VK_KHR_acceleration_structure");

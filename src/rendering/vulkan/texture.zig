@@ -84,7 +84,7 @@ pub fn getFormatAspectMask(format: vk.Format) vk.ImageAspectFlags {
 }
 
 pub fn hostImageCopy(
-    self: *Self,
+    self: *const Self,
     device: *Device,
     final_layout: vk.ImageLayout,
     data: []const u8,
