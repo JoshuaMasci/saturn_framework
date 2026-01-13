@@ -1,9 +1,11 @@
 const std = @import("std");
 
 const vk = @import("vulkan");
+const saturn = @import("../../root.zig");
 
 const Device = @import("device.zig");
 const GpuAllocator = @import("gpu_allocator.zig");
+const Binding = @import("bindless_descriptor.zig").Binding;
 
 const Self = @This();
 
@@ -14,6 +16,9 @@ allocation: ?GpuAllocator.Allocation = null,
 extent: vk.Extent2D,
 format: vk.Format,
 usage: vk.ImageUsageFlags,
+
+sampled_binding: ?Binding = null,
+storage_binding: ?Binding = null,
 
 pub fn init2D(device: *Device, extent: vk.Extent2D, format: vk.Format, usage: vk.ImageUsageFlags, memory_location: GpuAllocator.MemoryLocation) !Self {
     const handle = try device.proxy.createImage(&.{
@@ -67,22 +72,6 @@ pub fn deinit(self: Self, device: *Device) void {
         device.gpu_allocator.free(allocation);
 }
 
-pub fn getFormatAspectMask(format: vk.Format) vk.ImageAspectFlags {
-    return switch (format) {
-        // Depth-only formats
-        .d16_unorm, .d32_sfloat, .x8_d24_unorm_pack32 => .{ .depth_bit = true },
-
-        // Stencil-only formats
-        .s8_uint => .{ .stencil_bit = true },
-
-        // Depth-stencil formats
-        .d16_unorm_s8_uint, .d24_unorm_s8_uint, .d32_sfloat_s8_uint => .{ .depth_bit = true, .stencil_bit = true },
-
-        // All other formats (color formats)
-        else => .{ .color_bit = true },
-    };
-}
-
 pub fn hostImageCopy(
     self: *const Self,
     device: *Device,
@@ -128,4 +117,55 @@ pub fn hostImageCopy(
         };
         try device.proxy.copyMemoryToImageEXT(&copy_info);
     }
+}
+
+pub fn getVkFormat(format: saturn.TextureFormat) vk.Format {
+    return switch (format) {
+        .rgba8_unorm => .r8g8b8a8_unorm,
+        .bgra8_unorm => .b8g8r8a8_unorm,
+        .rgba16_float => .r16g16b16a16_sfloat,
+        .depth32_float => .d32_sfloat,
+        .bc1_rgba_unorm => .bc1_rgba_unorm_block,
+        .bc1_rgba_srgb => .bc1_rgba_srgb_block,
+        .bc2_rgba_unorm => .bc2_unorm_block,
+        .bc2_rgba_srgb => .bc2_srgb_block,
+        .bc3_rgba_unorm => .bc3_unorm_block,
+        .bc3_rgba_srgb => .bc3_srgb_block,
+        .bc4_r_unorm => .bc4_unorm_block,
+        .bc4_r_snorm => .bc4_snorm_block,
+        .bc5_rg_unorm => .bc5_unorm_block,
+        .bc5_rg_snorm => .bc5_snorm_block,
+        .bc6h_rgb_ufloat => .bc6h_ufloat_block,
+        .bc6h_rgb_sfloat => .bc6h_sfloat_block,
+        .bc7_rgba_unorm => .bc7_unorm_block,
+        .bc7_rgba_srgb => .bc7_srgb_block,
+    };
+}
+
+pub fn getVkImageUsage(usage: saturn.TextureUsage, is_color: bool) vk.ImageUsageFlags {
+    return .{
+        .transfer_src_bit = usage.transfer,
+        .transfer_dst_bit = usage.transfer,
+        .sampled_bit = usage.sampled,
+        .storage_bit = usage.storage,
+        .color_attachment_bit = usage.attachment and is_color,
+        .depth_stencil_attachment_bit = usage.attachment and !is_color,
+        .host_transfer_bit = usage.host_transfer,
+    };
+}
+
+pub fn getFormatAspectMask(format: vk.Format) vk.ImageAspectFlags {
+    return switch (format) {
+        // Depth-only formats
+        .d16_unorm, .d32_sfloat, .x8_d24_unorm_pack32 => .{ .depth_bit = true },
+
+        // Stencil-only formats
+        .s8_uint => .{ .stencil_bit = true },
+
+        // Depth-stencil formats
+        .d16_unorm_s8_uint, .d24_unorm_s8_uint, .d32_sfloat_s8_uint => .{ .depth_bit = true, .stencil_bit = true },
+
+        // All other formats (color formats)
+        else => .{ .color_bit = true },
+    };
 }

@@ -73,6 +73,9 @@ fn buildExample(
     });
     exe_mod.addImport("saturn", saturn);
 
+    const zmath = b.dependency("zmath", .{});
+    exe_mod.addImport("zmath", zmath.module("root"));
+
     const exe = b.addExecutable(.{
         .name = exe_name,
         .root_module = exe_mod,

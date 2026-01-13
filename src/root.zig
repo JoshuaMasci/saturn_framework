@@ -129,6 +129,7 @@ pub const PlatformInterface = struct {
         // Window
         createWindow: *const fn (ctx: *anyopaque, settings: WindowDesc) Error!WindowHandle,
         destroyWindow: *const fn (ctx: *anyopaque, window_handle: WindowHandle) void,
+        getWindowSize: *const fn (ctx: *anyopaque, window_handle: WindowHandle) [2]u32,
 
         // Gpu Devices
         getDevices: *const fn (ctx: *anyopaque) []const DeviceInfo,
@@ -150,6 +151,10 @@ pub const PlatformInterface = struct {
 
     pub fn destroyWindow(self: *const Self, window_handle: WindowHandle) void {
         self.vtable.destroyWindow(self.ctx, window_handle);
+    }
+
+    pub fn getWindowSize(self: *const Self, window_handle: WindowHandle) [2]u32 {
+        return self.vtable.getWindowSize(self.ctx, window_handle);
     }
 
     pub fn createDeviceBasic(self: *const Self, window_opt: ?WindowHandle, power_level: DevicePowerPreferance) Error!?DeviceInterface {
@@ -330,7 +335,6 @@ pub const TextureFormat = enum {
     rgba8_unorm,
     bgra8_unorm,
     rgba16_float,
-    depth32_float,
 
     bc1_rgba_unorm,
     bc1_rgba_srgb,
@@ -352,6 +356,15 @@ pub const TextureFormat = enum {
 
     bc7_rgba_unorm,
     bc7_rgba_srgb,
+
+    depth32_float,
+
+    pub fn isColor(self: TextureFormat) bool {
+        return switch (self) {
+            .depth32_float => false,
+            else => true,
+        };
+    }
 };
 
 pub const TextureUsage = struct {
@@ -362,6 +375,8 @@ pub const TextureUsage = struct {
     host_transfer: bool = false,
 };
 
+pub const SamplerDesc = struct {};
+
 // ----------------------------
 // Pipline Types
 // ----------------------------
@@ -371,18 +386,16 @@ pub const IndexType = enum {
     u32,
 };
 
-pub const Shader = struct {
-    pub const Handle = enum(u64) { null_handle = 0, _ };
+pub const ShaderHandle = enum(u64) { null_handle = 0, _ };
 
-    pub const Stage = enum {
-        vertex,
-        fragment,
-        compute,
-    };
+pub const ShaderStage = enum {
+    vertex,
+    fragment,
+    compute,
+};
 
-    pub const Desc = struct {
-        code: []const u32,
-    };
+pub const ShaderDesc = struct {
+    code: []const u32,
 };
 
 pub const GraphicsPipelineHandle = enum(u64) { null_handle = 0, _ };
@@ -393,12 +406,111 @@ pub const PrimitiveTopology = enum {
     line_list,
 };
 
+pub const VertexInputRate = enum {
+    vertex,
+    instance,
+};
+
+pub const VertexBinding = struct {
+    binding: u32,
+    stride: u32,
+    input_rate: VertexInputRate,
+};
+
+pub const VertexFormat = enum {
+    float,
+    float2,
+    float3,
+    float4,
+
+    int,
+    int2,
+    int3,
+    int4,
+
+    uint,
+    uint2,
+    uint3,
+    uint4,
+
+    u8x4_norm,
+    i8x4_norm,
+    u16x2_norm,
+    u16x4_norm,
+};
+
+pub const VertexAttribute = struct {
+    binding: u32,
+    location: u32,
+    format: VertexFormat,
+    offset: u32,
+};
+
+pub const VertexInputState = struct {
+    bindings: []const VertexBinding = &.{},
+    attributes: []const VertexAttribute = &.{},
+};
+
+pub const FillMode = enum {
+    solid,
+    wireframe,
+};
+
+pub const CullMode = enum {
+    none,
+    front,
+    back,
+};
+
+pub const FrontFace = enum {
+    clockwise,
+    counter_clockwise,
+};
+
+pub const RasterizerState = struct {
+    fill_mode: FillMode = .solid,
+    cull_mode: CullMode = .none,
+    front_face: FrontFace = .counter_clockwise,
+    depth_bias_enable: bool = false,
+    depth_bias_constant_factor: f32 = 0.0,
+    depth_bias_clamp: f32 = 0.0,
+    depth_bias_slope_factor: f32 = 0.0,
+};
+
+pub const CompareOp = enum(u8) {
+    never,
+    less,
+    equal,
+    less_equal,
+    greater,
+    not_equal,
+    greater_equal,
+    always,
+};
+
+pub const DepthStencilState = struct {
+    depth_test_enable: bool = false,
+    depth_write_enable: bool = false,
+    depth_compare_op: CompareOp = .never,
+    // stencil_test_enable: bool,
+    // front: StencilFaceState,
+    // back: StencilFaceState,
+};
+
+pub const RenderTargetInfo = struct {
+    color_targets: []const TextureFormat = &.{},
+    depth_target: ?TextureFormat = null,
+    // stencil_target: ?TextureFormat = null,
+};
+
 pub const GraphicsPipelineDesc = struct {
-    vertex: Shader.Handle,
-    fragment: ?Shader.Handle = null,
-    color_formats: []const TextureFormat = &.{},
-    depth_format: ?TextureFormat = null,
+    vertex: ShaderHandle,
+    fragment: ?ShaderHandle = null,
+    vertex_input_state: VertexInputState = .{},
     primitive_topology: PrimitiveTopology = .triangle_list,
+    raster_state: RasterizerState = .{},
+    depth_stencial_state: DepthStencilState = .{},
+    target_info: RenderTargetInfo = .{},
 };
 
 pub const ComputePipelineHandle = enum(u64) { null_handle = 0, _ };
@@ -529,10 +641,10 @@ pub const DeviceInterface = struct {
         canUploadTexture: *const fn (ctx: *anyopaque, handle: TextureHandle) bool,
         uploadTexture: *const fn (ctx: *anyopaque, handle: TextureHandle, data: []const u8) Error!void,
 
-        createShaderModule: *const fn (ctx: *anyopaque, desc: Shader.Desc) Error!Shader.Handle,
-        destroyShaderModule: *const fn (ctx: *anyopaque, handle: Shader.Handle) void,
+        createShaderModule: *const fn (ctx: *anyopaque, desc: ShaderDesc) Error!ShaderHandle,
+        destroyShaderModule: *const fn (ctx: *anyopaque, handle: ShaderHandle) void,
 
-        createGraphicsPipeline: *const fn (ctx: *anyopaque, desc: GraphicsPipelineDesc) Error!GraphicsPipelineHandle,
+        createGraphicsPipeline: *const fn (ctx: *anyopaque, desc: *const GraphicsPipelineDesc) Error!GraphicsPipelineHandle,
         destroyGraphicsPipeline: *const fn (ctx: *anyopaque, handle: GraphicsPipelineHandle) void,
 
         createComputePipeline: *const fn (ctx: *anyopaque, desc: ComputePipelineDesc) Error!ComputePipelineHandle,
@@ -577,15 +689,15 @@ pub const DeviceInterface = struct {
         return self.vtable.uploadTexture(self.ctx, handle, data);
     }
 
-    pub fn createShaderModule(self: *const Self, desc: Shader.Desc) Error!Shader.Handle {
+    pub fn createShaderModule(self: *const Self, desc: ShaderDesc) Error!ShaderHandle {
         return self.vtable.createShaderModule(self.ctx, desc);
     }
 
-    pub fn destroyShaderModule(self: *const Self, handle: Shader.Handle) void {
+    pub fn destroyShaderModule(self: *const Self, handle: ShaderHandle) void {
         self.vtable.destroyShaderModule(self.ctx, handle);
     }
 
-    pub fn createGraphicsPipeline(self: *const Self, desc: GraphicsPipelineDesc) Error!GraphicsPipelineHandle {
+    pub fn createGraphicsPipeline(self: *const Self, desc: *const GraphicsPipelineDesc) Error!GraphicsPipelineHandle {
         return self.vtable.createGraphicsPipeline(self.ctx, desc);
     }
 
@@ -640,8 +752,8 @@ pub const GraphicsCommandEncoder = struct {
         setPipeline: *const fn (ctx: *anyopaque, pipeline: GraphicsPipelineHandle) void,
         setViewport: *const fn (ctx: *anyopaque, x: f32, y: f32, width: f32, height: f32, min_depth: f32, max_depth: f32) void,
         setScissor: *const fn (ctx: *anyopaque, x: i32, y: i32, width: u32, height: u32) void,
-        setVertexBuffer: *const fn (ctx: *anyopaque, slot: u32, buf: BufferHandle, offset: usize) void,
-        setIndexBuffer: *const fn (ctx: *anyopaque, buf: BufferHandle, offset: usize, index_type: IndexType) void,
+        setVertexBuffer: *const fn (ctx: *anyopaque, slot: u32, buffer: RenderGraphBufferIndex, offset: usize) void,
+        setIndexBuffer: *const fn (ctx: *anyopaque, buffer: RenderGraphBufferIndex, offset: usize, index_type: IndexType) void,
 
         pushResources: *const fn (ctx: *anyopaque, resources: []const GraphResource) void,
 
@@ -657,8 +769,20 @@ pub const GraphicsCommandEncoder = struct {
         self.vtable.pushResources(self.ctx, resources);
     }
 
+    pub fn setVertexBuffer(self: Self, slot: u32, buffer: RenderGraphBufferIndex, offset: usize) void {
+        self.vtable.setVertexBuffer(self.ctx, slot, buffer, offset);
+    }
+
+    pub fn setIndexBuffer(self: Self, buffer: RenderGraphBufferIndex, offset: usize, index_type: IndexType) void {
+        self.vtable.setIndexBuffer(self.ctx, buffer, offset, index_type);
+    }
+
     pub fn draw(self: Self, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) void {
         self.vtable.draw(self.ctx, vertex_count, instance_count, first_vertex, first_instance);
+    }
+
+    pub fn drawIndexed(self: Self, index_count: u32, instance_count: u32, first_index: u32, vertex_offset: i32, first_instance: u32) void {
+        self.vtable.drawIndexed(self.ctx, index_count, instance_count, first_index, vertex_offset, first_instance);
     }
 };
 

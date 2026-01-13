@@ -52,6 +52,7 @@ pub fn init(allocator: std.mem.Allocator, graph: *const saturn.RenderGraphDesc, 
         const swapchain = device.swapchains.get(window.handle) orelse return error.InvalidWindowHandle;
 
         if (swapchain.out_of_date) {
+            device.device.proxy.deviceWaitIdle() catch {};
             const size = device.backend.get_window_size_fn(window.handle, device.backend.get_window_size_user_data);
             swapchain.rebuild(.{ .width = size[0], .height = size[1] }) catch return error.SwapchainError;
         }

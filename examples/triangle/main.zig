@@ -116,10 +116,12 @@ pub fn main() !void {
     });
     defer device.destroyShaderModule(triangle_fragment_shader);
 
-    const triangle_pipeline: saturn.GraphicsPipelineHandle = try device.createGraphicsPipeline(.{
-        .color_formats = &.{RenderTargetFormat},
+    const triangle_pipeline: saturn.GraphicsPipelineHandle = try device.createGraphicsPipeline(&.{
         .vertex = triangle_vertex_shader,
         .fragment = triangle_fragment_shader,
+        .target_info = .{
+            .color_targets = &.{RenderTargetFormat},
+        },
     });
     defer device.destroyGraphicsPipeline(triangle_pipeline);
 

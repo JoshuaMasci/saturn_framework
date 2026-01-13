@@ -179,7 +179,7 @@ pub const Device = struct {
             self.freed.texture.deinit(gpa);
         }
 
-        pub fn reset(self: *@This(), device: *VkDevice) void {
+        pub fn reset(self: *@This(), device: *Device) void {
             self.frame_wait_fences.clearRetainingCapacity();
             self.graphics_command_pool.reset() catch |err| {
                 //If this fails, well just allocate more buffers I guess ¯\_(ツ)_/¯
@@ -192,27 +192,33 @@ pub const Device = struct {
             };
 
             for (self.freed.pipelines.items) |pipeline| {
-                device.proxy.destroyPipeline(pipeline, null);
+                device.device.proxy.destroyPipeline(pipeline, null);
             }
             self.freed.pipelines.clearRetainingCapacity();
 
             for (self.freed.buffers.items) |buffer| {
+                if (buffer.uniform_binding) |binding| {
+                    device.descriptor.uniform_buffer_array.clear(binding);
+                }
 
-                //TODO: free here
-                // if (buffer.uniform_binding) |binding| {
-                //     self.descriptor.uniform_buffer_array.clear(binding);
-                // }
+                if (buffer.storage_binding) |binding| {
+                    device.descriptor.storage_buffer_array.clear(binding);
+                }
 
-                // if (buffer.storage_binding) |binding| {
-                //     self.descriptor.storage_buffer_array.clear(binding);
-                // }
-
-                buffer.deinit(device);
+                buffer.deinit(device.device);
             }
             self.freed.buffers.clearRetainingCapacity();
 
             for (self.freed.texture.items) |texture| {
-                texture.deinit(device);
+                if (texture.sampled_binding) |binding| {
+                    device.descriptor.sampled_image_array.clear(binding);
+                }
+
+                if (texture.storage_binding) |binding| {
+                    device.descriptor.storage_image_array.clear(binding);
+                }
+
+                texture.deinit(device.device);
             }
             self.freed.texture.clearRetainingCapacity();
         }
@@ -227,9 +233,10 @@ pub const Device = struct {
     descriptor: BindlessDescriptor,
 
     pipeline_layout: vk.PipelineLayout,
+    linear_sampler: vk.Sampler,
 
     swapchains: std.AutoHashMap(saturn.WindowHandle, *Swapchain),
-    shader_modules: std.AutoHashMap(vk.ShaderModule, void),
+    shader_modules: std.AutoHashMap(saturn.ShaderHandle, vk.ShaderModule),
     graphics_pipelines: std.AutoHashMap(vk.Pipeline, void),
     compute_pipelines: std.AutoHashMap(vk.Pipeline, void),
     buffers: std.AutoHashMap(vk.Buffer, Buffer),
@@ -299,6 +306,25 @@ pub const Device = struct {
         }, null) catch return error.InitializationFailed;
         errdefer device.proxy.destroyPipelineLayout(pipeline_layout, null);
 
+        const linear_sampler = device.proxy.createSampler(&.{
+            .mag_filter = .linear,
+            .min_filter = .linear,
+            .mipmap_mode = .nearest,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .mip_lod_bias = 0.0,
+            .anisotropy_enable = .false,
+            .max_anisotropy = 0.0,
+            .compare_enable = .false,
+            .compare_op = .always,
+            .min_lod = 0.0,
+            .max_lod = vk.LOD_CLAMP_NONE,
+            .border_color = .float_opaque_black,
+            .unnormalized_coordinates = .false,
+        }, null) catch return error.InitializationFailed;
+        errdefer device.proxy.destroySampler(linear_sampler, null);
+
         const per_frame_data = try gpa.alloc(PerFrameData, desc.frames_in_flight);
         errdefer gpa.free(per_frame_data);
 
@@ -319,6 +345,7 @@ pub const Device = struct {
 
             .descriptor = descriptor,
             .pipeline_layout = pipeline_layout,
+            .linear_sampler = linear_sampler,
 
             .swapchains = .init(gpa),
             .shader_modules = .init(gpa),
@@ -336,12 +363,12 @@ pub const Device = struct {
         _ = self.device.proxy.deviceWaitIdle() catch {};
 
         for (self.per_frame_data) |*frame_data| {
-            frame_data.reset(self.device);
+            frame_data.reset(self);
             frame_data.deinit(self.gpa);
         }
         self.gpa.free(self.per_frame_data);
 
-        var shader_iter = self.shader_modules.keyIterator();
+        var shader_iter = self.shader_modules.valueIterator();
         while (shader_iter.next()) |module| {
             self.device.proxy.destroyShaderModule(module.*, null);
         }
@@ -358,6 +385,7 @@ pub const Device = struct {
             self.device.proxy.destroyPipeline(pipeline.*, null);
         }
 
+        self.device.proxy.destroySampler(self.linear_sampler, null);
         self.device.proxy.destroyPipelineLayout(self.pipeline_layout, null);
         self.descriptor.deinit();
 
@@ -494,8 +522,8 @@ pub const Device = struct {
     fn createTexture(ctx: *anyopaque, desc: saturn.TextureDesc) saturn.Error!saturn.TextureHandle {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
-        const format = getVkFormat(desc.format);
-        const usage = getVkImageUsage(desc.usage);
+        const format = Texture.getVkFormat(desc.format);
+        const usage = Texture.getVkImageUsage(desc.usage, desc.format.isColor());
 
         var texture = Texture.init2D(self.device, .{ .width = desc.width, .height = desc.height }, format, usage, .gpu_only) catch |err| {
             return switch (err) {
@@ -505,6 +533,14 @@ pub const Device = struct {
             };
         };
         errdefer texture.deinit(self.device);
+
+        if (desc.usage.sampled) {
+            texture.sampled_binding = self.descriptor.sampled_image_array.bind(texture, self.linear_sampler);
+        }
+
+        if (desc.usage.storage) {
+            texture.storage_binding = self.descriptor.storage_image_array.bind(texture, .null_handle);
+        }
 
         self.textures.put(texture.handle, texture) catch return error.OutOfMemory;
 
@@ -525,6 +561,14 @@ pub const Device = struct {
 
         if (self.textures.fetchRemove(vk_image)) |entry| {
             self.per_frame_data[self.frame_index].freed.texture.append(self.gpa, entry.value) catch {
+                if (entry.value.sampled_binding) |binding| {
+                    self.descriptor.sampled_image_array.clear(binding);
+                }
+
+                if (entry.value.storage_binding) |binding| {
+                    self.descriptor.storage_image_array.clear(binding);
+                }
+
                 entry.value.deinit(self.device);
             };
         }
@@ -557,7 +601,7 @@ pub const Device = struct {
         }
     }
 
-    fn createShaderModule(ctx: *anyopaque, desc: saturn.Shader.Desc) saturn.Error!saturn.Shader.Handle {
+    fn createShaderModule(ctx: *anyopaque, desc: saturn.ShaderDesc) saturn.Error!saturn.ShaderHandle {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         const module = self.device.proxy.createShaderModule(&.{
@@ -571,44 +615,28 @@ pub const Device = struct {
             };
         };
 
-        self.shader_modules.put(module, {}) catch {
+        const handle: saturn.ShaderHandle = @enumFromInt(@intFromEnum(module));
+
+        self.shader_modules.put(handle, module) catch {
             self.device.proxy.destroyShaderModule(module, null);
             return error.OutOfMemory;
         };
 
-        return @enumFromInt(@intFromEnum(module));
+        return handle;
     }
 
-    fn destroyShaderModule(ctx: *anyopaque, module: saturn.Shader.Handle) void {
+    fn destroyShaderModule(ctx: *anyopaque, handle: saturn.ShaderHandle) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        const vk_module: vk.ShaderModule = @enumFromInt(@intFromEnum(module));
 
-        if (self.shader_modules.remove(vk_module)) {
-            self.device.proxy.destroyShaderModule(vk_module, null);
+        if (self.shader_modules.fetchRemove(handle)) |module| {
+            self.device.proxy.destroyShaderModule(module.value, null);
         }
     }
 
-    fn createGraphicsPipeline(ctx: *anyopaque, desc: saturn.GraphicsPipelineDesc) saturn.Error!saturn.GraphicsPipelineHandle {
+    fn createGraphicsPipeline(ctx: *anyopaque, desc: *const saturn.GraphicsPipelineDesc) saturn.Error!saturn.GraphicsPipelineHandle {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
-        const vertex_module: vk.ShaderModule = @enumFromInt(@intFromEnum(desc.vertex));
-        const fragment_module: ?vk.ShaderModule = if (desc.fragment) |frag| @enumFromInt(@intFromEnum(frag)) else null;
-
-        if (!self.shader_modules.contains(vertex_module)) return error.InvalidUsage;
-        if (fragment_module) |module| {
-            if (!self.shader_modules.contains(module)) return error.InvalidUsage;
-        }
-
-        const pipeline = Pipeline.createGraphicsPipeline(
-            self.device.proxy,
-            self.pipeline_layout,
-            .{
-                .color_format = getVkFormat(desc.color_formats[0]),
-            },
-            .{},
-            vertex_module,
-            fragment_module,
-        ) catch return error.InvalidUsage;
+        const pipeline = Pipeline.createGraphicsPipeline(self, desc) catch return error.InvalidUsage;
         errdefer self.device.proxy.destroyPipeline(pipeline, null);
 
         try self.graphics_pipelines.put(pipeline, {});
@@ -650,8 +678,8 @@ pub const Device = struct {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         // Use existing conversion functions
-        const vk_format = getVkFormat(desc.texture_format);
-        const vk_usage = getVkImageUsage(desc.texture_usage);
+        const vk_format = Texture.getVkFormat(desc.texture_format);
+        const vk_usage = Texture.getVkImageUsage(desc.texture_usage, true); //Swapchain is always color
         const vk_present_mode = getVkPresentMode(desc.present_mode);
 
         // Get the surface for this window
@@ -733,7 +761,7 @@ pub const Device = struct {
             ) catch return error.DeviceLost;
             frame_data.frame_wait_fences.clearRetainingCapacity();
         }
-        frame_data.reset(self.device);
+        frame_data.reset(self);
 
         self.descriptor.writeUpdates(tpa) catch return error.DeviceLost;
 
@@ -761,40 +789,6 @@ fn getVkBufferUsage(usage: saturn.BufferUsage) vk.BufferUsageFlags {
         .storage_buffer_bit = usage.storage,
         .transfer_src_bit = usage.transfer_src,
         .transfer_dst_bit = usage.transfer_dst,
-    };
-}
-
-fn getVkFormat(format: saturn.TextureFormat) vk.Format {
-    return switch (format) {
-        .rgba8_unorm => .r8g8b8a8_unorm,
-        .bgra8_unorm => .b8g8r8a8_unorm,
-        .rgba16_float => .r16g16b16a16_sfloat,
-        .depth32_float => .d32_sfloat,
-        .bc1_rgba_unorm => .bc1_rgba_unorm_block,
-        .bc1_rgba_srgb => .bc1_rgba_srgb_block,
-        .bc2_rgba_unorm => .bc2_unorm_block,
-        .bc2_rgba_srgb => .bc2_srgb_block,
-        .bc3_rgba_unorm => .bc3_unorm_block,
-        .bc3_rgba_srgb => .bc3_srgb_block,
-        .bc4_r_unorm => .bc4_unorm_block,
-        .bc4_r_snorm => .bc4_snorm_block,
-        .bc5_rg_unorm => .bc5_unorm_block,
-        .bc5_rg_snorm => .bc5_snorm_block,
-        .bc6h_rgb_ufloat => .bc6h_ufloat_block,
-        .bc6h_rgb_sfloat => .bc6h_sfloat_block,
-        .bc7_rgba_unorm => .bc7_unorm_block,
-        .bc7_rgba_srgb => .bc7_srgb_block,
-    };
-}
-
-fn getVkImageUsage(usage: saturn.TextureUsage) vk.ImageUsageFlags {
-    return .{
-        .transfer_src_bit = usage.transfer,
-        .transfer_dst_bit = usage.transfer,
-        .sampled_bit = usage.sampled,
-        .storage_bit = usage.storage,
-        .color_attachment_bit = usage.attachment,
-        .host_transfer_bit = usage.host_transfer,
     };
 }
 

@@ -68,22 +68,17 @@ pub const GraphicsCommandEncoder = struct {
         self.command_buffer.setScissor(0, 1, &.{rect});
     }
 
-    fn setVertexBuffer(ctx: *anyopaque, slot: u32, buf: saturn.BufferHandle, offset: usize) void {
-        _ = slot; // autofix
-        _ = buf; // autofix
-        _ = offset; // autofix
-
+    fn setVertexBuffer(ctx: *anyopaque, slot: u32, buffer: saturn.RenderGraphBufferIndex, offset: usize) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        _ = self; // autofix
+        self.command_buffer.bindVertexBuffers(slot, 1, &.{self.resources.buffers[buffer.idx].buffer.handle}, &.{offset});
     }
 
-    fn setIndexBuffer(ctx: *anyopaque, buf: saturn.BufferHandle, offset: usize, index_type: saturn.IndexType) void {
-        _ = buf; // autofix
-        _ = offset; // autofix
-        _ = index_type; // autofix
-
+    fn setIndexBuffer(ctx: *anyopaque, buffer: saturn.RenderGraphBufferIndex, offset: usize, index_type: saturn.IndexType) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        _ = self; // autofix
+        self.command_buffer.bindIndexBuffer(self.resources.buffers[buffer.idx].buffer.handle, offset, switch (index_type) {
+            .u16 => .uint16,
+            .u32 => .uint32,
+        });
     }
 
     pub fn pushResources(ctx: *anyopaque, resources: []const saturn.GraphResource) void {
@@ -99,7 +94,8 @@ pub const GraphicsCommandEncoder = struct {
             index.* = switch (resource) {
                 .uniform_buffer => |buffer| self.resources.buffers[buffer.idx].buffer.uniform_binding.?.asU32(),
                 .storage_buffer => |buffer| self.resources.buffers[buffer.idx].buffer.storage_binding.?.asU32(),
-                else => 0,
+                .sampled_texture => |texture| self.resources.textures[texture.idx].texture.sampled_binding.?.asU32(),
+                .storage_texture => |texture| self.resources.textures[texture.idx].texture.storage_binding.?.asU32(),
             };
         }
 

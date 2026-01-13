@@ -52,7 +52,7 @@ pub fn init(gpa: std.mem.Allocator, desc: saturn.PlatformDesc) saturn.Error!Self
         loader,
         exts[0..ext_len],
         createSurface,
-        getWindowSize,
+        vkGetWindowSize,
         null,
         desc.app_info,
         desc.app_info,
@@ -82,6 +82,7 @@ pub fn interface(self: *Self) saturn.PlatformInterface {
 
             .createWindow = createWindow,
             .destroyWindow = destroyWindow,
+            .getWindowSize = getWindowSize,
 
             .getDevices = getDevices,
 
@@ -95,7 +96,7 @@ pub fn interface(self: *Self) saturn.PlatformInterface {
 }
 
 pub fn process_events(ctx: *anyopaque, callbacks: saturn.PlatformCallbacks) void {
-    _ = ctx; // autofix
+    const self: *Self = @ptrCast(@alignCast(ctx));
 
     var event: c.SDL_Event = undefined;
     while (c.SDL_PollEvent(&event)) {
@@ -106,14 +107,23 @@ pub fn process_events(ctx: *anyopaque, callbacks: saturn.PlatformCallbacks) void
                 }
             },
             c.SDL_EVENT_WINDOW_RESIZED => {
-                if (callbacks.window_resize) |resize_fn| {
-                    if (c.SDL_GetWindowFromID(event.window.windowID)) |sdl_window| {
-                        const size: [2]u32 = .{ @intCast(event.window.data1), @intCast(event.window.data2) };
-                        const window: saturn.WindowHandle = @enumFromInt(@intFromPtr(sdl_window));
-                        resize_fn(callbacks.ctx, window, size);
-                    } else {
-                        std.log.warn("SDL_GetWindowFromID Failed for ID({})", .{event.window.windowID});
+                if (c.SDL_GetWindowFromID(event.window.windowID)) |sdl_window| {
+                    const size: [2]u32 = .{ @intCast(event.window.data1), @intCast(event.window.data2) };
+                    const window: saturn.WindowHandle = @enumFromInt(@intFromPtr(sdl_window));
+
+                    //Mark windows swapchain as out of date
+                    var iter = self.backend.devices.iterator();
+                    while (iter.next()) |entry| {
+                        if (entry.key_ptr.*.swapchains.get(window)) |swapchain| {
+                            swapchain.out_of_date = true;
+                        }
                     }
+
+                    if (callbacks.window_resize) |resize_fn| {
+                        resize_fn(callbacks.ctx, window, size);
+                    }
+                } else {
+                    std.log.warn("SDL_GetWindowFromID Failed for ID({})", .{event.window.windowID});
                 }
             },
             c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => {
@@ -221,6 +231,18 @@ pub fn destroyWindow(ctx: *anyopaque, window: saturn.WindowHandle) void {
     const sdl_window: ?*c.SDL_Window = @ptrFromInt(@intFromEnum(window));
     c.SDL_DestroyWindow(sdl_window);
 }
+pub fn getWindowSize(ctx: *anyopaque, window: saturn.WindowHandle) [2]u32 {
+    _ = ctx; // autofix
+    const sdl_window: ?*c.SDL_Window = @ptrFromInt(@intFromEnum(window));
+
+    var w: c_int = 0;
+    var h: c_int = 0;
+    _ = c.SDL_GetWindowSize(sdl_window, &w, &h);
+    return .{
+        @intCast(w),
+        @intCast(h),
+    };
+}
 
 pub fn getDevices(ctx: *anyopaque) []const saturn.DeviceInfo {
     const self: *Self = @ptrCast(@alignCast(ctx));
@@ -251,10 +273,10 @@ pub fn destroyDevice(ctx: *anyopaque, device: saturn.DeviceInterface) void {
 /// Callback function for getting window size from SDL3
 /// This is passed to the rendering backend to query window dimensions
 /// Returns [width, height] as a backend-agnostic type
-fn getWindowSize(window: saturn.WindowHandle, user_data: ?*anyopaque) [2]u32 {
-    const sdl_window: ?*c.SDL_Window = @ptrFromInt(@intFromEnum(window));
+fn vkGetWindowSize(window: saturn.WindowHandle, user_data: ?*anyopaque) [2]u32 {
+    _ = user_data; // autofix
 
-    _ = user_data;
+    const sdl_window: ?*c.SDL_Window = @ptrFromInt(@intFromEnum(window));
     var w: c_int = 0;
     var h: c_int = 0;
     _ = c.SDL_GetWindowSize(sdl_window, &w, &h);
