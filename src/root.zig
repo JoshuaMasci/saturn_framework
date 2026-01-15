@@ -333,7 +333,10 @@ pub const TextureDesc = struct {
 
 pub const TextureFormat = enum {
     rgba8_unorm,
+    rgba8_srgb,
     bgra8_unorm,
+    bgra8_srgb,
+
     rgba16_float,
 
     bc1_rgba_unorm,
@@ -460,6 +463,7 @@ pub const CullMode = enum {
     none,
     front,
     back,
+    all,
 };
 
 pub const FrontFace = enum {
@@ -639,7 +643,7 @@ pub const DeviceInterface = struct {
         createTexture: *const fn (ctx: *anyopaque, desc: TextureDesc) Error!TextureHandle,
         destroyTexture: *const fn (ctx: *anyopaque, handle: TextureHandle) void,
         canUploadTexture: *const fn (ctx: *anyopaque, handle: TextureHandle) bool,
-        uploadTexture: *const fn (ctx: *anyopaque, handle: TextureHandle, data: []const u8) Error!void,
+        uploadTexture: *const fn (ctx: *anyopaque, handle: TextureHandle, mip_level: u32, data: []const u8) Error!void,
 
         createShaderModule: *const fn (ctx: *anyopaque, desc: ShaderDesc) Error!ShaderHandle,
         destroyShaderModule: *const fn (ctx: *anyopaque, handle: ShaderHandle) void,
@@ -685,8 +689,8 @@ pub const DeviceInterface = struct {
         return self.vtable.canUploadTexture(self.ctx, handle);
     }
 
-    pub fn uploadTexture(self: *const Self, handle: TextureHandle, data: []const u8) Error!void {
-        return self.vtable.uploadTexture(self.ctx, handle, data);
+    pub fn uploadTexture(self: *const Self, handle: TextureHandle, mip_level: u32, data: []const u8) Error!void {
+        return self.vtable.uploadTexture(self.ctx, handle, mip_level, data);
     }
 
     pub fn createShaderModule(self: *const Self, desc: ShaderDesc) Error!ShaderHandle {

@@ -286,6 +286,7 @@ fn toVkCullMode(c: saturn.CullMode) vk.CullModeFlags {
         .none => .{},
         .front => .{ .front_bit = true },
         .back => .{ .back_bit = true },
+        .all => .{ .front_bit = true, .back_bit = true },
     };
 }
 

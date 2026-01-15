@@ -105,6 +105,7 @@ pub fn init(
             .view_handle = view_handle,
 
             .extent = extent,
+            .mip_levels = 1,
             .format = format,
             .usage = usage,
         };

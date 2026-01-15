@@ -310,9 +310,9 @@ pub const Device = struct {
             .mag_filter = .linear,
             .min_filter = .linear,
             .mipmap_mode = .nearest,
-            .address_mode_u = .repeat,
-            .address_mode_v = .repeat,
-            .address_mode_w = .repeat,
+            .address_mode_u = .clamp_to_edge,
+            .address_mode_v = .clamp_to_edge,
+            .address_mode_w = .clamp_to_edge,
             .mip_lod_bias = 0.0,
             .anisotropy_enable = .false,
             .max_anisotropy = 0.0,
@@ -525,7 +525,14 @@ pub const Device = struct {
         const format = Texture.getVkFormat(desc.format);
         const usage = Texture.getVkImageUsage(desc.usage, desc.format.isColor());
 
-        var texture = Texture.init2D(self.device, .{ .width = desc.width, .height = desc.height }, format, usage, .gpu_only) catch |err| {
+        var texture = Texture.init2D(
+            self.device,
+            .{ .width = desc.width, .height = desc.height },
+            desc.mip_levels,
+            format,
+            usage,
+            .gpu_only,
+        ) catch |err| {
             return switch (err) {
                 error.OutOfHostMemory, error.OutOfDeviceMemory => error.OutOfMemory,
                 error.NoSuitableMemoryType => error.InvalidUsage,
@@ -591,13 +598,13 @@ pub const Device = struct {
         return false;
     }
 
-    fn uploadTexture(ctx: *anyopaque, handle: saturn.TextureHandle, data: []const u8) saturn.Error!void {
+    fn uploadTexture(ctx: *anyopaque, handle: saturn.TextureHandle, mip_level: u32, data: []const u8) saturn.Error!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         const vk_image: vk.Image = @enumFromInt(@intFromEnum(handle));
         std.debug.assert(self.device.extensions.host_image_copy);
 
         if (self.textures.get(vk_image)) |texture| {
-            texture.hostImageCopy(self.device, .shader_read_only_optimal, data) catch return error.Unknown;
+            texture.hostImageCopy(self.device, mip_level, .shader_read_only_optimal, data) catch return error.Unknown;
         }
     }
 

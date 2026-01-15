@@ -4,7 +4,7 @@
 #include "bindless.glsl"
 
 struct UniformData {
-    float rotation;
+    mat4 mvp;
 };
 UNIFORM_BINDING(UniformData, uniform_data);
 
@@ -20,6 +20,7 @@ layout(push_constant) uniform PushConstants
 } push_constants;
 
 void main() {
-    gl_Position = vec4(inPos, 1.0);
+    const mat4 mvp_matrix = UNIFORM_LOAD(uniform_data, push_constants.uniform_binding).mvp;
+    gl_Position = mvp_matrix * vec4(inPos, 1.0);
     outUV = inUV;
 }

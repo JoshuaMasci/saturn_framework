@@ -76,6 +76,9 @@ fn buildExample(
     const zmath = b.dependency("zmath", .{});
     exe_mod.addImport("zmath", zmath.module("root"));
 
+    const zstbi = b.dependency("zstbi", .{});
+    exe_mod.addImport("zstbi", zstbi.module("root"));
+
     const exe = b.addExecutable(.{
         .name = exe_name,
         .root_module = exe_mod,

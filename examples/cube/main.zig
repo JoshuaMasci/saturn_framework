@@ -2,6 +2,7 @@ const std = @import("std");
 
 const saturn = @import("saturn");
 const zm = @import("zmath");
+const zstbi = @import("zstbi");
 
 //Globals
 var is_running: bool = true;
@@ -103,7 +104,6 @@ const cube = struct {
     };
 };
 
-var new_window_size: ?[2]u32 = null;
 var right_stick_values: [2]f32 = @splat(0.0);
 
 pub fn main() !void {
@@ -170,11 +170,11 @@ pub fn main() !void {
     );
     defer device.releaseWindow(window);
 
-    const size = platform.getWindowSize(window);
-    const depth_texture = try device.createTexture(.{
+    var depth_texture_size = platform.getWindowSize(window);
+    var depth_texture = try device.createTexture(.{
         .name = "depth_target_texture",
-        .width = size[0],
-        .height = size[1],
+        .width = depth_texture_size[0],
+        .height = depth_texture_size[1],
         .format = DepthTargetFormat,
         .usage = .{ .attachment = true },
         .memory = .gpu_only,
@@ -182,14 +182,17 @@ pub fn main() !void {
     defer device.destroyTexture(depth_texture);
 
     // Texture load
-    const ppm_texture = try readRgbaPpm(gpa, @embedFile("texture.ppm"));
-    defer gpa.free(ppm_texture.data);
-    std.log.info("Texture Loaded: {}x{}", .{ ppm_texture.width, ppm_texture.height });
+    zstbi.init(gpa);
+    defer zstbi.deinit();
+    var stb_image = try zstbi.Image.loadFromMemory(@embedFile("saturn.png"), 4);
+    defer stb_image.deinit();
+
+    std.log.info("Texture Loaded: {}x{}", .{ stb_image.width, stb_image.height });
 
     const sampled_texture = try device.createTexture(.{
         .name = "sampled_texture",
-        .width = ppm_texture.width,
-        .height = ppm_texture.height,
+        .width = stb_image.width,
+        .height = stb_image.height,
         .format = .rgba8_unorm,
         .usage = .{
             .sampled = true,
@@ -201,7 +204,7 @@ pub fn main() !void {
     defer device.destroyTexture(sampled_texture);
 
     std.debug.assert(device.canUploadTexture(sampled_texture));
-    try device.uploadTexture(sampled_texture, ppm_texture.data);
+    try device.uploadTexture(sampled_texture, 0, stb_image.data);
 
     // Mesh load
     const vertex_buffer = try device.createBuffer(.{
@@ -268,6 +271,10 @@ pub fn main() !void {
                 },
             },
         },
+        .raster_state = .{
+            .cull_mode = .back,
+            .front_face = .counter_clockwise,
+        },
         .depth_stencial_state = .{
             .depth_test_enable = true,
             .depth_write_enable = true,
@@ -282,11 +289,13 @@ pub fn main() !void {
 
     const uniform_buffer = try device.createBuffer(.{
         .name = "uniform_buffer",
-        .size = 16,
+        .size = @sizeOf(zm.Mat),
         .usage = .{ .uniform = true, .transfer_dst = true },
         .memory = .cpu_to_gpu,
     });
     defer device.destroyBuffer(uniform_buffer);
+
+    var cube_rotation: zm.Quat = zm.qidentity();
 
     while (is_running) {
         _ = arena_allocator.reset(.retain_capacity);
@@ -301,12 +310,40 @@ pub fn main() !void {
             .gamepad_axis = gamepadAxisCallback,
         });
 
+        const yaw = if (@abs(right_stick_values[0]) > 0.25) right_stick_values[0] else 0.0;
+        const pitch = if (@abs(right_stick_values[1]) > 0.25) right_stick_values[1] else 0.0;
+        const ROT_SPEED: f32 = std.math.pi * 2.0;
+        const FAKE_DT: f32 = 1.0 / 360.0;
+        cube_rotation = zm.qmul(cube_rotation, zm.quatFromRollPitchYaw(-pitch * ROT_SPEED * FAKE_DT, yaw * ROT_SPEED * FAKE_DT, 0.0));
+
         var builder = saturn.RenderGraphBuilder.init(tpa);
         defer builder.deinit();
+
+        const window_size_int = platform.getWindowSize(window);
+
+        if (!std.mem.eql(u32, &window_size_int, &depth_texture_size)) {
+            depth_texture_size = window_size_int;
+            device.destroyTexture(depth_texture);
+            depth_texture = try device.createTexture(.{
+                .name = "depth_target_texture",
+                .width = depth_texture_size[0],
+                .height = depth_texture_size[1],
+                .format = DepthTargetFormat,
+                .usage = .{ .attachment = true },
+                .memory = .gpu_only,
+            });
+        }
+
+        const width_float: f32 = @floatFromInt(window_size_int[0]);
+        const height_float: f32 = @floatFromInt(window_size_int[1]);
+        const aspect_ratio: f32 = width_float / height_float;
 
         const uniform_buffer_handle = try builder.importBuffer(uniform_buffer);
         var update_callback_ctx: UpdateCallbackData = .{
             .uniform_buffer_handle = uniform_buffer_handle,
+            .aspect_ratio = aspect_ratio,
+            .fov_x = 75.0,
+            .cube_rotation = cube_rotation,
         };
 
         {
@@ -327,10 +364,13 @@ pub fn main() !void {
         };
 
         {
+            const depth_texture_handle = try builder.importTexture(depth_texture);
+
             const swapchain_texture = try builder.importWindow(window);
             var render_pass = try builder.beginPass(.initCStr("Cube Pass"));
             render_pass.render_target = .{};
             render_pass.render_target.?.color_attachemnts.add(.{ .texture = swapchain_texture, .clear = @splat(0.25) });
+            render_pass.render_target.?.depth_attachment = .{ .texture = depth_texture_handle, .clear = 1 };
             render_pass.buffer_usages.add(.{ .buffer = uniform_buffer_handle, .usage = .none });
             render_pass.render_callback = .{ .ctx = @ptrCast(&render_callback_ctx), .callback = renderCallback };
             try render_pass.end();
@@ -350,13 +390,30 @@ pub fn writeBuffer(device: saturn.DeviceInterface, buffer: saturn.BufferHandle, 
 }
 
 const UpdateCallbackData = struct {
+    aspect_ratio: f32,
+    fov_x: f32,
     uniform_buffer_handle: saturn.RenderGraphBufferIndex,
+    cube_rotation: zm.Quat,
 };
 
 fn updateCallback(ctx: ?*anyopaque, encoder: saturn.TransferCommandEncoder) void {
-    _ = encoder; // autofix
-    const callback_data: *UpdateCallbackData = @ptrCast(@alignCast(ctx.?));
-    _ = callback_data; // autofix
+    const data: *UpdateCallbackData = @ptrCast(@alignCast(ctx.?));
+
+    const CUBE_POS: zm.Vec = .{ 0, 0, 2.5, 0 };
+    const EYE_POS: zm.Vec = .{ 0, 0, 0, 0 };
+    const EYE_UP: zm.Vec = .{ 0, 1, 0, 0 };
+    const NEAR: f32 = 0.1;
+    const FAR: f32 = 100.0;
+
+    const fov_y: f32 = std.math.atan(std.math.tan(std.math.degreesToRadians(data.fov_x) / 2.0) / data.aspect_ratio) * 2.0;
+
+    const model_matrix = zm.mul(zm.matFromQuat(data.cube_rotation), zm.translationV(CUBE_POS));
+    const view_matrix = zm.lookAtRh(EYE_POS, CUBE_POS, EYE_UP);
+    var projection_matrix = zm.perspectiveFovRh(fov_y, data.aspect_ratio, NEAR, FAR);
+    projection_matrix[1][1] *= -1;
+    const mvp_matrix = zm.mul(zm.mul(model_matrix, view_matrix), projection_matrix);
+    const mvp_matrix_bytes: []const u8 = std.mem.asBytes(&mvp_matrix);
+    encoder.updateBuffer(data.uniform_buffer_handle, 0, mvp_matrix_bytes);
 }
 
 const RenderCallbackData = struct {
@@ -381,50 +438,4 @@ fn renderCallback(ctx: ?*anyopaque, encoder: saturn.GraphicsCommandEncoder) void
     encoder.setIndexBuffer(callback_data.index_buffer_handle, 0, .u16);
 
     encoder.drawIndexed(callback_data.index_count, 1, 0, 0, 0);
-}
-
-//Super basic ppm loader, doesnt support comments
-fn readRgbaPpm(gpa: std.mem.Allocator, data: []const u8) !struct {
-    width: u32,
-    height: u32,
-    data: []const u8,
-} {
-    //Expected header "P6.{WIDTH} {HEIGHT}.255"
-
-    const MAGIC: []const u8 = "P6\n";
-    const TAIL: []const u8 = "\n255";
-
-    const magic: []const u8 = data[0..MAGIC.len];
-    if (!std.mem.eql(u8, magic, MAGIC)) {
-        return error.InvalidMagic;
-    }
-
-    const end_pos = std.mem.indexOf(u8, data[0..20], TAIL) orelse return error.InvaildHeader;
-    const dim_str = data[MAGIC.len..end_pos];
-    var dim_split = std.mem.splitAny(u8, dim_str, " ");
-    const width_str = dim_split.next() orelse return error.InvaildHeader;
-    const height_str = dim_split.next() orelse return error.InvaildHeader;
-
-    const width = try std.fmt.parseInt(u32, width_str, 10);
-    const height = try std.fmt.parseInt(u32, height_str, 10);
-    const pixel_count = width * height;
-
-    const rgba_data = try gpa.alloc(u8, pixel_count * 4);
-    errdefer gpa.free(rgba_data);
-
-    const rgb_data: []const u8 = data[end_pos..];
-
-    for (0..pixel_count) |idx| {
-        const rgb_idx = idx * 3;
-        const rgba_idx = idx * 4;
-
-        @memcpy(rgba_data[rgba_idx..(rgba_idx + 3)], rgb_data[rgb_idx..(rgb_idx + 3)]);
-        rgba_data[rgba_idx + 3] = 0;
-    }
-
-    return .{
-        .width = width,
-        .height = height,
-        .data = rgba_data,
-    };
 }

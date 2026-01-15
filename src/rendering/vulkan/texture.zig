@@ -14,18 +14,19 @@ view_handle: vk.ImageView,
 allocation: ?GpuAllocator.Allocation = null,
 
 extent: vk.Extent2D,
+mip_levels: u32,
 format: vk.Format,
 usage: vk.ImageUsageFlags,
 
 sampled_binding: ?Binding = null,
 storage_binding: ?Binding = null,
 
-pub fn init2D(device: *Device, extent: vk.Extent2D, format: vk.Format, usage: vk.ImageUsageFlags, memory_location: GpuAllocator.MemoryLocation) !Self {
+pub fn init2D(device: *Device, extent: vk.Extent2D, mip_levels: u32, format: vk.Format, usage: vk.ImageUsageFlags, memory_location: GpuAllocator.MemoryLocation) !Self {
     const handle = try device.proxy.createImage(&.{
         .image_type = .@"2d",
         .format = format,
         .extent = .{ .width = extent.width, .height = extent.height, .depth = 1 },
-        .mip_levels = 1,
+        .mip_levels = mip_levels,
         .array_layers = 1,
         .samples = .{ .@"1_bit" = true },
         .tiling = .optimal,
@@ -56,6 +57,7 @@ pub fn init2D(device: *Device, extent: vk.Extent2D, format: vk.Format, usage: vk
 
     return .{
         .extent = extent,
+        .mip_levels = mip_levels,
         .format = format,
         .usage = usage,
         .handle = handle,
@@ -75,6 +77,7 @@ pub fn deinit(self: Self, device: *Device) void {
 pub fn hostImageCopy(
     self: *const Self,
     device: *Device,
+    mip_level: u32,
     final_layout: vk.ImageLayout,
     data: []const u8,
 ) !void {
@@ -82,11 +85,11 @@ pub fn hostImageCopy(
         const transition_info = vk.HostImageLayoutTransitionInfo{
             .image = self.handle,
             .old_layout = .undefined,
-            .new_layout = final_layout,
+            .new_layout = .transfer_dst_optimal,
             .subresource_range = .{
                 .aspect_mask = getFormatAspectMask(self.format),
                 .base_mip_level = 0,
-                .level_count = 1,
+                .level_count = self.mip_levels,
                 .base_array_layer = 0,
                 .layer_count = 1,
             },
@@ -101,7 +104,7 @@ pub fn hostImageCopy(
             .memory_image_height = 0,
             .image_subresource = vk.ImageSubresourceLayers{
                 .aspect_mask = getFormatAspectMask(self.format),
-                .mip_level = 0,
+                .mip_level = mip_level,
                 .base_array_layer = 0,
                 .layer_count = 1,
             },
@@ -111,18 +114,36 @@ pub fn hostImageCopy(
 
         const copy_info: vk.CopyMemoryToImageInfo = .{
             .dst_image = self.handle,
-            .dst_image_layout = final_layout,
+            .dst_image_layout = .transfer_dst_optimal,
             .region_count = 1,
             .p_regions = @ptrCast(&region),
         };
         try device.proxy.copyMemoryToImageEXT(&copy_info);
+
+        {
+            const transition_info = vk.HostImageLayoutTransitionInfo{
+                .image = self.handle,
+                .old_layout = .transfer_dst_optimal,
+                .new_layout = final_layout,
+                .subresource_range = .{
+                    .aspect_mask = getFormatAspectMask(self.format),
+                    .base_mip_level = 0,
+                    .level_count = self.mip_levels,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            };
+            try device.proxy.transitionImageLayoutEXT(1, @ptrCast(&transition_info));
+        }
     }
 }
 
 pub fn getVkFormat(format: saturn.TextureFormat) vk.Format {
     return switch (format) {
         .rgba8_unorm => .r8g8b8a8_unorm,
+        .rgba8_srgb => .r8g8b8a8_srgb,
         .bgra8_unorm => .b8g8r8a8_unorm,
+        .bgra8_srgb => .b8g8r8a8_srgb,
         .rgba16_float => .r16g16b16a16_sfloat,
         .depth32_float => .d32_sfloat,
         .bc1_rgba_unorm => .bc1_rgba_unorm_block,
